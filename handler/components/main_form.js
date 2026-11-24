@@ -3,6 +3,7 @@ import {
   addDefaultFieldsEventListener,
   loadCaseFields
 } from "./fraud.template.js";
+import { bindProductHierarchyEvents } from "./util.js";
 import { addSubmitFormEventListener } from "../services/service_v2.js";
 
 export function renderForm() {
@@ -24,6 +25,7 @@ export function renderForm() {
   formContainer.innerHTML = formHtml;
 
   addDefaultFieldsEventListener();
+  bindProductHierarchyEvents(formContainer);
 
   const selectedCase = window?.PayloadData?.customFields?.k7;
   if (selectedCase) {
