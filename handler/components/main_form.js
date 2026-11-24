@@ -25,7 +25,7 @@ export function renderForm() {
   formContainer.innerHTML = formHtml;
 
   addDefaultFieldsEventListener();
-  bindProductHierarchyEvents(formContainer);
+  bindProductHierarchyEvents(formContainer); 
 
   const selectedCase = window?.PayloadData?.customFields?.k7;
   if (selectedCase) {
