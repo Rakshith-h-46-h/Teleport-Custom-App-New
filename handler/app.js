@@ -12,7 +12,7 @@ export let yAppWidget = null;
     yAppWidget = new YAppWidget();
 
     // Load default fraud.json template directly
-    const fraudRes = await fetch("./assets/json/fraud.json");
+    const fraudRes = await fetch("./assets/json/fraud.json", { cache: "no-store" });
     if (!fraudRes.ok) {
       throw new Error("Cannot load fraud.json");
     }
