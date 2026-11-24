@@ -1,4 +1,3 @@
-
 import { applyDebugState } from "./components/applyDebugState.js";
 import { renderForm } from "./components/main_form.js";
 
@@ -44,6 +43,83 @@ export let yAppWidget = null;
   }
 })();
 
+function getCurrentFieldValue(field) {
+  const raw =
+    field.currentValue ??
+    field.selectedValue ??
+    field.selectedValues ??
+    field.value ??
+    null;
+
+  if (Array.isArray(field.levels) && Array.isArray(field.options)) {
+    const nameById = new Map();
+    field.options.flat().forEach((opt) => {
+      if (opt && opt.id) nameById.set(opt.id, opt.name ?? opt.id);
+    });
+
+    if (Array.isArray(raw) && raw.length > 0) {
+      return raw
+        .map((item) => {
+          if (typeof item === "object" && item !== null) {
+            return item.name ?? nameById.get(item.id) ?? item.id ?? "";
+          }
+          return nameById.get(item) ?? String(item);
+        })
+        .filter(Boolean)
+        .join(" → ");
+    }
+
+    if (raw && typeof raw === "object") {
+      return Object.values(raw)
+        .map((val) => nameById.get(val) ?? String(val))
+        .filter(Boolean)
+        .join(" → ");
+    }
+
+    if (typeof raw === "string" && raw) {
+      return nameById.get(raw) ?? raw;
+    }
+
+    return "Not set";
+  }
+
+  if (raw === null || raw === undefined || raw === "") {
+    return "Not set";
+  }
+  if (Array.isArray(raw)) {
+    return raw
+      .map((v) => (typeof v === "object" ? v.name ?? v.label ?? JSON.stringify(v) : v))
+      .join(", ");
+  }
+  if (typeof raw === "object") {
+    return JSON.stringify(raw);
+  }
+  return String(raw);
+}
+
+function renderPayloadViewer(fields, containerId = "payload-fields-viewer") {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  if (!Array.isArray(fields) || fields.length === 0) {
+    container.innerHTML = "<p>No custom fields found.</p>";
+    return;
+  }
+
+  container.innerHTML = fields
+    .map((field) => {
+      const label = field.label || field.name || field.key || "Field";
+      const val = getCurrentFieldValue(field);
+      return `
+        <div class="field-row" style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #eee;">
+          <span><strong>${label}</strong> <small>(${field.key || ""})</small></span>
+          <span>${val}</span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
 function runRenderForm() {
   const messageDisplay = document.getElementById(
     "ticket-title-forbidden"
@@ -55,6 +131,7 @@ function runRenderForm() {
     }
 
     renderForm();
+    renderPayloadViewer(window.PayloadCustomFields);
 
     document.querySelectorAll("#customForm select").forEach(select => {
       new Choices(select, {
