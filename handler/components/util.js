@@ -22,7 +22,7 @@ function generateDropdownCustomField(customField, containerClassName, isRequired
   let labelName = escapeHtml(customField.name);
   if (isRequired) labelName += " *";
 
-  fieldHtml += `<div id="${customField.key}-container" class="${containerClassName}"">`;
+  fieldHtml += `<div id="${customField.key}-container" class="${containerClassName}">`;
   fieldHtml += `<label for="${customField.key}">${labelName}</label>`;
   fieldHtml += `<select id="${customField.key}" name="${customField.name}" class="dynamic-dropdown" ${isRequired ? "required" : ""}>`;
 
@@ -99,11 +99,58 @@ function generateNumberCustomField(customField, containerClassName, isRequired) 
   return fieldHtml;
 }
 
+function generateHierarchicalCustomField(customField, containerClassName, isRequired) {
+  let fieldHtml = '';
+
+  const ticketCustomFieldValue = window?.PayloadData?.customFields?.[customField.key];
+  const levels = Array.isArray(customField.levels) ? customField.levels : [];
+  const optionsByLevel = Array.isArray(customField.options) ? customField.options : [];
+  let labelName = escapeHtml(customField.name);
+  if (isRequired) labelName += " *";
+
+  fieldHtml += `<div id="${customField.key}-container" class="${containerClassName}">`;
+  fieldHtml += `<label>${labelName}</label>`;
+
+  levels.forEach((levelName, idx) => {
+    const selectId = `${customField.key}_level_${idx}`;
+    const levelOptions = Array.isArray(optionsByLevel[idx]) ? optionsByLevel[idx] : [];
+    const selectedForLevel = Array.isArray(ticketCustomFieldValue)
+      ? (typeof ticketCustomFieldValue[idx] === "object" ? ticketCustomFieldValue[idx]?.id : ticketCustomFieldValue[idx])
+      : ticketCustomFieldValue && typeof ticketCustomFieldValue === "object"
+      ? (ticketCustomFieldValue[idx] ?? ticketCustomFieldValue[levelName] ?? "")
+      : idx === 0
+      ? ticketCustomFieldValue
+      : "";
+
+    fieldHtml += `<div class="hierarchy-level">`;
+    fieldHtml += `<label for="${selectId}">${escapeHtml(levelName)}</label>`;
+    fieldHtml += `<select id="${selectId}" name="${escapeHtml(customField.name)}_${idx}" class="dynamic-dropdown hierarchy-select" data-key="${escapeHtml(customField.key)}" data-level="${idx}" ${isRequired ? "required" : ""}>`;
+    fieldHtml += `<option value="" disabled ${!selectedForLevel ? "selected" : ""}>Select ${escapeHtml(levelName)}</option>`;
+
+    levelOptions.forEach((opt) => {
+      const optId = opt?.id ?? opt?.value ?? opt?.name ?? "";
+      const optName = opt?.name ?? opt?.label ?? optId;
+      const parentId = opt?.parent ?? "";
+      const isSelected = String(optId) === String(selectedForLevel) ? "selected" : "";
+
+      fieldHtml += `<option value="${escapeHtml(optId)}" data-parent="${escapeHtml(parentId)}" ${isSelected}>${escapeHtml(optName)}</option>`;
+    });
+
+    fieldHtml += `</select>`;
+    fieldHtml += `</div>`;
+  });
+
+  fieldHtml += `<span id="${customField.key}-error-message" class="error-message hidden">${escapeHtml(customField.name) + ' cannot be empty'}</span>`;
+  fieldHtml += `</div>`;
+
+  return fieldHtml;
+}
+
 export function escapeHtml(str) {
   return String(str)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+    .replaceAll("&", "&")
+    .replaceAll("<", "<")
+    .replaceAll(">", ">")
+    .replaceAll('"', """)
+    .replaceAll("'", "'");
 }
