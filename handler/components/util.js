@@ -1,360 +1,296 @@
 const choicesInstances = new WeakMap();
 
 export function escapeHtml(str) {
-  return String(str ?? "")
-    .replaceAll("&", "&")
-    .replaceAll("<", "<")
-    .replaceAll(">", ">")
-    .replaceAll('"', '"')
-    .replaceAll("'", "'");
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/&/g, "&")
+    .replace(/</g, "<")
+    .replace(/>/g, ">")
+    .replace(/"/g, '"')
+    .replace(/'/g, "'");
+}
+
+export function destroyChoicesOnSelect(select) {
+  if (!select) return;
+  const existing = choicesInstances.get(select);
+  if (existing && typeof existing.destroy === "function") {
+    try {
+      existing.destroy();
+    } catch (_) {
+      // Ignore if already detached from DOM
+    }
+  }
+  choicesInstances.delete(select);
 }
 
 export function initChoicesOnSelect(select) {
-  if (!select || typeof Choices === "undefined") return;
+  if (!select) return;
+  destroyChoicesOnSelect(select);
 
-  const existing = choicesInstances.get(select);
-  if (existing && typeof existing.destroy === "function") {
-    existing.destroy();
-    choicesInstances.delete(select);
-  }
-
-  try {
-    const instance = new Choices(select, {
+  if (typeof window.Choices === "function") {
+    const instance = new window.Choices(select, {
       searchEnabled: true,
       shouldSort: false,
       itemSelectText: "",
-      searchResultLimit: 9999,
-      renderChoiceLimit: -1,
-      removeItemButton: true,
-      allowHTML: false,
-      fuseOptions: {
-        threshold: 0.3
-      }
+      placeholder: true,
+      placeholderValue: select.dataset.placeholder || "Select an option"
     });
     choicesInstances.set(select, instance);
-  } catch (err) {
-    console.warn("Choices init skipped for select:", select.id, err);
   }
 }
 
-function normalizeOption(item) {
-  if (typeof item === "string" || typeof item === "number") {
-    return { id: String(item), name: String(item), parent: "" };
-  }
-  const id = String(item?.id ?? item?.value ?? item?.name ?? "");
-  const name = String(item?.name ?? item?.label ?? id);
-  const parent = item?.parent !== undefined && item?.parent !== null ? String(item.parent) : "";
-  return { id, name, parent };
+export function getCustomFieldConfig(cfKey) {
+  const fields = window?.PayloadCustomFields;
+  if (!Array.isArray(fields)) return null;
+  return fields.find((item) => String(item.key) === String(cfKey)) || null;
 }
 
-function getHierarchyMap(cfKey, customField) {
-  const jsonHierarchy = window?.DefaultFieldsData?.hierarchy;
-  if (jsonHierarchy && typeof jsonHierarchy === "object") {
-    if (jsonHierarchy[cfKey] && typeof jsonHierarchy[cfKey] === "object") {
-      return jsonHierarchy[cfKey];
-    }
-    return jsonHierarchy;
-  }
+export function getPrefilledHierarchyValues(cfKey) {
+  const raw = window?.PayloadData?.customFields?.[cfKey];
+  if (raw === undefined || raw === null || raw === "") return [];
 
-  if (Array.isArray(customField?.options) && customField.options.length >= 2) {
-    const map = {};
-    const products = Array.isArray(customField.options[0]) ? customField.options[0].map(normalizeOption) : [];
-    const classifications = Array.isArray(customField.options[1]) ? customField.options[1].map(normalizeOption) : [];
-    const subclassifications = Array.isArray(customField.options[2]) ? customField.options[2].map(normalizeOption) : [];
-
-    products.forEach((prod) => {
-      map[prod.name] = {};
-      classifications
-        .filter((cls) => !cls.parent || cls.parent === prod.id || cls.parent === prod.name)
-        .forEach((cls) => {
-          map[prod.name][cls.name] = subclassifications
-            .filter((sub) => !sub.parent || sub.parent === cls.id || sub.parent === cls.name)
-            .map((sub) => sub.name);
-        });
-    });
-
-    return map;
+  if (Array.isArray(raw)) {
+    return raw
+      .map((item) => {
+        if (item && typeof item === "object") {
+          return String(item.id ?? item.value ?? item.name ?? "");
+        }
+        return String(item ?? "");
+      })
+      .filter((v) => v !== "");
   }
 
-  return {};
+  if (typeof raw === "object") {
+    const candidates = [
+      raw.product ?? raw.level0 ?? raw[0],
+      raw.classification ?? raw.level1 ?? raw[1],
+      raw.subclassification ?? raw.sub_classification ?? raw.level2 ?? raw[2],
+      raw.details ?? raw.detail ?? raw.level3 ?? raw[3]
+    ];
+    return candidates
+      .filter((v) => v !== undefined && v !== null && v !== "")
+      .map((v) => (typeof v === "object" ? String(v.id ?? v.value ?? v.name ?? "") : String(v)));
+  }
+
+  return [String(raw)];
 }
 
-export function getProductsForField(cfKey) {
-  const customField = window?.PayloadCustomFields?.find((cf) => cf.key === cfKey);
-  const map = getHierarchyMap(cfKey, customField);
-  return Object.keys(map).map((productName) => ({ id: productName, name: productName }));
-}
+function getSortedLevelOptions(field, levelIndex, parentId = null) {
+  const levelList = Array.isArray(field?.options?.[levelIndex]) ? field.options[levelIndex] : [];
 
-export function getClassificationsForProduct(cfKey, selectedProduct) {
-  if (!selectedProduct) return [];
-  const customField = window?.PayloadCustomFields?.find((cf) => cf.key === cfKey);
-  const map = getHierarchyMap(cfKey, customField);
-  const byProduct = map[selectedProduct];
-  if (!byProduct || typeof byProduct !== "object") return [];
-  return Object.keys(byProduct).map((clsName) => ({ id: clsName, name: clsName }));
-}
-
-export function getSubclassificationsForSelection(cfKey, selectedProduct, selectedClassification) {
-  if (!selectedProduct || !selectedClassification) return [];
-  const customField = window?.PayloadCustomFields?.find((cf) => cf.key === cfKey);
-  const map = getHierarchyMap(cfKey, customField);
-  const subs = map?.[selectedProduct]?.[selectedClassification];
-  if (!Array.isArray(subs)) return [];
-  return subs.map((item) => normalizeOption(item));
-}
-
-function populateSelectOptions(selectEl, placeholderText, items, selectedValue = "") {
-  const optionsHtml = [
-    `<option value="" disabled ${!selectedValue ? "selected" : ""}>${escapeHtml(placeholderText)}</option>`,
-    ...items.map((item) => {
-      const opt = normalizeOption(item);
-      const isSelected = selectedValue && String(opt.id) === String(selectedValue) ? "selected" : "";
-      return `<option value="${escapeHtml(opt.id)}" ${isSelected}>${escapeHtml(opt.name)}</option>`;
+  return levelList
+    .filter((opt) => {
+      if (!opt) return false;
+      if (levelIndex === 0 || parentId === null || parentId === "") {
+        return opt.parent === null || opt.parent === undefined || opt.parent === "";
+      }
+      return String(opt.parent) === String(parentId);
     })
-  ].join("");
-
-  selectEl.innerHTML = optionsHtml;
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
 
-export function generateProductHierarchyField(cfKey, containerClassName = "", isRequired = false) {
-  const customField = window?.PayloadCustomFields?.find((cf) => cf.key === cfKey);
-  if (!customField) return "";
+function resolveOptionId(options, rawValue) {
+  if (!rawValue) return "";
+  const match = options.find(
+    (opt) => String(opt.id) === String(rawValue) || String(opt.name).trim() === String(rawValue).trim()
+  );
+  return match ? String(match.id) : String(rawValue);
+}
 
-  const reqAttr = isRequired ? "required" : "";
-  const labelText = `${escapeHtml(customField.name)}${isRequired ? " *" : ""}`;
-  const products = getProductsForField(cfKey);
-
-  const rawSaved = window?.PayloadData?.customFields?.[cfKey];
-  let savedProduct = "";
-  let savedClassification = "";
-  let savedSubclassification = "";
-
-  if (Array.isArray(rawSaved)) {
-    savedProduct = rawSaved[0] ?? "";
-    savedClassification = rawSaved[1] ?? "";
-    savedSubclassification = rawSaved[2] ?? "";
-  } else if (rawSaved && typeof rawSaved === "object") {
-    savedProduct = rawSaved.product ?? rawSaved[0] ?? "";
-    savedClassification = rawSaved.classification ?? rawSaved[1] ?? "";
-    savedSubclassification = rawSaved.subclassification ?? rawSaved[2] ?? "";
-  } else if (typeof rawSaved === "string") {
-    savedProduct = rawSaved;
-  }
-
-  const classifications = savedProduct ? getClassificationsForProduct(cfKey, savedProduct) : [];
-  const subclassifications =
-    savedProduct && savedClassification
-      ? getSubclassificationsForSelection(cfKey, savedProduct, savedClassification)
-      : [];
-
-  const showClassification = Boolean(savedProduct) && classifications.length > 0;
-  const showSubclassification = showClassification && Boolean(savedClassification) && subclassifications.length > 0;
-
-  let html = `<div id="${escapeHtml(cfKey)}-container" class="${escapeHtml(containerClassName)} product-hierarchy-wrapper" data-cf-key="${escapeHtml(cfKey)}">`;
-  html += `<div class="hierarchy-group-label">${labelText}</div>`;
-
-  html += `
-    <div id="${escapeHtml(cfKey)}-product-box" class="hierarchy-step" data-step="product">
-      <label for="${escapeHtml(cfKey)}_product">Product${isRequired ? " *" : ""}</label>
-      <select id="${escapeHtml(cfKey)}_product" name="${escapeHtml(cfKey)}_product" class="dynamic-dropdown hierarchy-product" ${reqAttr}>
-        ${buildOptionListHtml("Select Product", products, savedProduct)}
-      </select>
-    </div>
-  `;
-
-  html += `
-    <div id="${escapeHtml(cfKey)}-classification-box" class="hierarchy-step ${showClassification ? "" : "hidden"}" data-step="classification">
-      <label for="${escapeHtml(cfKey)}_classification">Classification${isRequired ? " *" : ""}</label>
-      <select id="${escapeHtml(cfKey)}_classification" name="${escapeHtml(cfKey)}_classification" class="dynamic-dropdown hierarchy-classification" ${showClassification ? "" : "disabled"} ${reqAttr}>
-        ${buildOptionListHtml("Select Classification", classifications, savedClassification)}
-      </select>
-    </div>
-  `;
-
-  html += `
-    <div id="${escapeHtml(cfKey)}-subclassification-box" class="hierarchy-step ${showSubclassification ? "" : "hidden"}" data-step="subclassification">
-      <label for="${escapeHtml(cfKey)}_subclassification">Subclassification${isRequired ? " *" : ""}</label>
-      <select id="${escapeHtml(cfKey)}_subclassification" name="${escapeHtml(cfKey)}_subclassification" class="dynamic-dropdown hierarchy-subclassification" ${showSubclassification ? "" : "disabled"} ${reqAttr}>
-        ${buildOptionListHtml("Select Subclassification", subclassifications, savedSubclassification)}
-      </select>
-    </div>
-  `;
-
-  html += `<span id="${escapeHtml(cfKey)}-error-message" class="error-message hidden">${escapeHtml(customField.name)} cannot be empty</span>`;
-  html += `</div>`;
-
+function buildSelectOptionsHtml(options, placeholder, selectedId = "") {
+  let html = `<option value="" ${!selectedId ? "selected" : ""}>${escapeHtml(placeholder)}</option>`;
+  options.forEach((opt) => {
+    const optId = String(opt.id);
+    const isSelected = selectedId !== "" && optId === String(selectedId) ? "selected" : "";
+    html += `<option value="${escapeHtml(optId)}" ${isSelected}>${escapeHtml(String(opt.name).trim())}</option>`;
+  });
   return html;
 }
 
-function buildOptionListHtml(placeholderText, items, selectedValue = "") {
-  return [
-    `<option value="" disabled ${!selectedValue ? "selected" : ""}>${escapeHtml(placeholderText)}</option>`,
-    ...items.map((item) => {
-      const opt = normalizeOption(item);
-      const isSelected = selectedValue && String(opt.id) === String(selectedValue) ? "selected" : "";
-      return `<option value="${escapeHtml(opt.id)}" ${isSelected}>${escapeHtml(opt.name)}</option>`;
-    })
-  ].join("");
+function generateHierarchyFieldHtml(field, wrapperClass, isRequired) {
+  const levels = Array.isArray(field.levels) && field.levels.length > 0 ? field.levels : [field.name || field.key];
+  const reqAttr = isRequired ? "required" : "";
+  const reqStar = isRequired ? " *" : "";
+
+  let html = `<div class="hierarchy-field-group ${escapeHtml(wrapperClass)}" data-hierarchy-key="${escapeHtml(field.key)}">`;
+
+  levels.forEach((levelLabel, idx) => {
+    const selectId = `${field.key}_level_${idx}`;
+    const wrapperId = `${selectId}-wrapper`;
+    const placeholder = `Select ${levelLabel}`;
+    const hiddenClass = idx === 0 ? "" : " hidden";
+
+    html += `<div id="${escapeHtml(wrapperId)}" class="field-item hierarchy-level-item${hiddenClass}" data-level-index="${idx}">`;
+    html += `<label for="${escapeHtml(selectId)}">${escapeHtml(levelLabel)}${reqStar}</label>`;
+    html += `<select id="${escapeHtml(selectId)}" name="${escapeHtml(selectId)}" class="dynamic-dropdown hierarchy-select" data-hierarchy-key="${escapeHtml(field.key)}" data-level-index="${idx}" data-placeholder="${escapeHtml(placeholder)}" ${reqAttr}>`;
+    html += `<option value="" selected>${escapeHtml(placeholder)}</option>`;
+    html += `</select>`;
+    html += `<span id="${escapeHtml(selectId)}-error-message" class="error-message hidden">${escapeHtml(levelLabel)} cannot be empty</span>`;
+    html += `</div>`;
+  });
+
+  html += `</div>`;
+  return html;
 }
 
-export function bindProductHierarchyEvents(rootContainer = document.getElementById("formContainer")) {
-  if (!rootContainer || rootContainer.dataset.hierarchyBound === "true") return;
-  rootContainer.dataset.hierarchyBound = "true";
+function populateAndToggleHierarchyLevel(field, levelIndex, parentId, rawPrefilledValue, initChoices = false) {
+  const select = document.getElementById(`${field.key}_level_${levelIndex}`);
+  const wrapper = document.getElementById(`${field.key}_level_${levelIndex}-wrapper`);
+  if (!select || !wrapper) return { selectedId: "", hasOptions: false };
 
-  rootContainer.addEventListener("change", (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLSelectElement)) return;
+  const levels = Array.isArray(field.levels) ? field.levels : [];
+  const levelLabel = levels[levelIndex] || `Level ${levelIndex + 1}`;
+  const placeholder = `Select ${levelLabel}`;
 
-    const wrapper = target.closest(".product-hierarchy-wrapper");
-    if (!wrapper) return;
+  const canShowParentDependent = levelIndex === 0 || (parentId !== null && parentId !== "");
+  const options = canShowParentDependent ? getSortedLevelOptions(field, levelIndex, parentId) : [];
+  const resolvedSelectedId = resolveOptionId(options, rawPrefilledValue);
 
-    const cfKey = wrapper.dataset.cfKey;
-    const classBox = wrapper.querySelector(`#${CSS.escape(cfKey)}-classification-box`);
-    const classSelect = wrapper.querySelector(`#${CSS.escape(cfKey)}_classification`);
-    const subBox = wrapper.querySelector(`#${CSS.escape(cfKey)}-subclassification-box`);
-    const subSelect = wrapper.querySelector(`#${CSS.escape(cfKey)}_subclassification`);
+  select.innerHTML = buildSelectOptionsHtml(options, placeholder, resolvedSelectedId);
+  if (resolvedSelectedId) {
+    select.value = resolvedSelectedId;
+  }
 
-    if (target.classList.contains("hierarchy-product")) {
-      const selectedProduct = target.value;
-      const classifications = getClassificationsForProduct(cfKey, selectedProduct);
+  const shouldShow =
+    levelIndex === 0 ||
+    (canShowParentDependent && (options.length > 0 || resolvedSelectedId !== ""));
 
-      if (subSelect && subBox) {
-        subSelect.disabled = true;
-        populateSelectOptions(subSelect, "Select Subclassification", []);
-        initChoicesOnSelect(subSelect);
-        subBox.classList.add("hidden");
-      }
+  wrapper.classList.toggle("hidden", !shouldShow);
 
-      if (classSelect && classBox) {
-        const hasClassifications = Boolean(selectedProduct) && classifications.length > 0;
-        populateSelectOptions(classSelect, "Select Classification", classifications);
-        classSelect.disabled = !hasClassifications;
-        classBox.classList.toggle("hidden", !hasClassifications);
-        initChoicesOnSelect(classSelect);
-      }
-    } else if (target.classList.contains("hierarchy-classification")) {
-      const productSelect = wrapper.querySelector(`#${CSS.escape(cfKey)}_product`);
-      const selectedProduct = productSelect?.value || "";
-      const selectedClassification = target.value;
-      const subclassifications = getSubclassificationsForSelection(
-        cfKey,
-        selectedProduct,
-        selectedClassification
+  if (initChoices) {
+    initChoicesOnSelect(select);
+  }
+
+  return {
+    selectedId: resolvedSelectedId,
+    hasOptions: options.length > 0
+  };
+}
+
+export function hydratePrefilledHierarchies(rootElement = document) {
+  const groups = rootElement.querySelectorAll("[data-hierarchy-key]");
+
+  groups.forEach((group) => {
+    const cfKey = group.getAttribute("data-hierarchy-key");
+    const field = getCustomFieldConfig(cfKey);
+    if (!field || !Array.isArray(field.levels)) return;
+
+    const prefilledValues = getPrefilledHierarchyValues(cfKey);
+    let currentParentId = null;
+
+    field.levels.forEach((_, idx) => {
+      const prefillForLevel = prefilledValues[idx] || "";
+      const { selectedId, hasOptions } = populateAndToggleHierarchyLevel(
+        field,
+        idx,
+        currentParentId,
+        prefillForLevel,
+        false
       );
 
-      if (subSelect && subBox) {
-        const hasSubclassifications = Boolean(selectedClassification) && subclassifications.length > 0;
-        populateSelectOptions(subSelect, "Select Subclassification", subclassifications);
-        subSelect.disabled = !hasSubclassifications;
-        subBox.classList.toggle("hidden", !hasSubclassifications);
-        initChoicesOnSelect(subSelect);
+      // Move down the chain whenever a value is prefilled (or if level 0 has a prefilled value)
+      if (selectedId) {
+        currentParentId = selectedId;
+      } else if (prefillForLevel) {
+        currentParentId = prefillForLevel;
+      } else {
+        currentParentId = "";
+      }
+
+      // If no value is prefilled at this level, hide any levels deeper than this one
+      if (!currentParentId && !hasOptions) {
+        for (let deeper = idx + 1; deeper < field.levels.length; deeper++) {
+          const deeperWrapper = document.getElementById(`${field.key}_level_${deeper}-wrapper`);
+          const deeperSelect = document.getElementById(`${field.key}_level_${deeper}`);
+          if (deeperSelect) destroyChoicesOnSelect(deeperSelect);
+          if (deeperWrapper) deeperWrapper.classList.add("hidden");
+        }
+      }
+    });
+
+    // Initialize Choices.js on all level selects after all values & visibility are set
+    field.levels.forEach((_, idx) => {
+      const select = document.getElementById(`${field.key}_level_${idx}`);
+      if (select) initChoicesOnSelect(select);
+    });
+  });
+}
+
+export function bindProductHierarchyEvents(formContainer) {
+  if (!formContainer) return;
+
+  formContainer.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!target || !target.classList?.contains("hierarchy-select")) return;
+
+    const cfKey = target.getAttribute("data-hierarchy-key");
+    const changedLevel = Number(target.getAttribute("data-level-index"));
+    const field = getCustomFieldConfig(cfKey);
+    if (!field || !Array.isArray(field.levels) || Number.isNaN(changedLevel)) return;
+
+    let parentId = target.value || "";
+
+    for (let nextIdx = changedLevel + 1; nextIdx < field.levels.length; nextIdx++) {
+      const nextSelect = document.getElementById(`${field.key}_level_${nextIdx}`);
+      const nextWrapper = document.getElementById(`${field.key}_level_${nextIdx}-wrapper`);
+
+      if (nextIdx === changedLevel + 1 && parentId) {
+        const { hasOptions } = populateAndToggleHierarchyLevel(field, nextIdx, parentId, "", true);
+        if (!hasOptions) {
+          parentId = "";
+        }
+      } else {
+        if (nextSelect) {
+          destroyChoicesOnSelect(nextSelect);
+          const nextLabel = field.levels[nextIdx] || `Level ${nextIdx + 1}`;
+          nextSelect.innerHTML = `<option value="" selected>Select ${escapeHtml(nextLabel)}</option>`;
+          initChoicesOnSelect(nextSelect);
+        }
+        if (nextWrapper) {
+          nextWrapper.classList.add("hidden");
+        }
       }
     }
   });
 }
 
-export function generateCustomField(cfKey, containerClassName, isRequired = false) {
-  let fieldHtml = "";
+export function generateCustomField(cfKey, containerClass = "custom-field-container", isRequired = false) {
+  const field = getCustomFieldConfig(cfKey);
+  if (!field) return "";
 
-  const customField = window?.PayloadCustomFields?.find((cf) => cf.key === cfKey);
-
-  if (customField) {
-    if (customField.element === "radiobuttons") fieldHtml += generateDropdownCustomField(customField, containerClassName, isRequired);
-    else if (customField.element === "longText") fieldHtml += generateTextCustomField(customField, containerClassName, isRequired);
-    else if (customField.element === "date") fieldHtml += generateDateCustomField(customField, containerClassName, isRequired);
-    else if (customField.element === "number") fieldHtml += generateNumberCustomField(customField, containerClassName, isRequired);
-    else if (customField.element === "shortText") fieldHtml += generateTextCustomField(customField, containerClassName, isRequired);
-    else if (
-      customField.element === "hierarchicalCustomField" ||
-      customField.element === "productHierarchy"
-    ) {
-      fieldHtml += generateProductHierarchyField(cfKey, containerClassName, isRequired);
-    }
+  if (Array.isArray(field.levels) && field.levels.length > 0 && Array.isArray(field.options)) {
+    return generateHierarchyFieldHtml(field, containerClass, isRequired);
   }
 
-  return fieldHtml;
-}
+  const savedValue = window?.PayloadData?.customFields?.[field.key] ?? "";
+  const reqAttr = isRequired ? "required" : "";
+  const reqStar = isRequired ? " *" : "";
+  const fieldId = `cf_${field.key}`;
+  const labelText = `${field.label || field.name || field.key}${reqStar}`;
 
-function generateDropdownCustomField(customField, containerClassName, isRequired) {
-  let fieldHtml = "";
+  let html = `<div id="${escapeHtml(fieldId)}-container" class="field-item ${escapeHtml(containerClass)}">`;
+  html += `<label for="${escapeHtml(fieldId)}">${escapeHtml(labelText)}</label>`;
 
-  const ticketCustomFieldValue = window?.PayloadData?.customFields?.[customField.key];
-  let labelName = escapeHtml(customField.name);
-  if (isRequired) labelName += " *";
-
-  fieldHtml += `<div id="${customField.key}-container" class="${containerClassName}">`;
-  fieldHtml += `<label for="${customField.key}">${labelName}</label>`;
-  fieldHtml += `<select id="${customField.key}" name="${customField.name}" class="dynamic-dropdown" ${isRequired ? "required" : ""}>`;
-
-  fieldHtml += `<option value="" disabled selected>Select ${escapeHtml(customField.name)}</option>`;
-  customField.radiobuttons.forEach((option) => {
-    fieldHtml += `<option value="${option}" ${option === ticketCustomFieldValue ? "selected" : ""}>${escapeHtml(option)}</option>`;
-  });
-
-  const isValueInvalid =
-    ticketCustomFieldValue &&
-    !customField.radiobuttons.find((option) => option === ticketCustomFieldValue);
-  if (isValueInvalid) {
-    fieldHtml += `<option value="${ticketCustomFieldValue}" selected disabled>${escapeHtml(ticketCustomFieldValue)}</option>`;
+  if (field.element === "dropdown" || field.element === "select") {
+    const opts = Array.isArray(field.options) ? field.options : [];
+    html += `<select id="${escapeHtml(fieldId)}" name="${escapeHtml(fieldId)}" class="dynamic-dropdown" data-placeholder="Select ${escapeHtml(field.label || field.name || field.key)}" ${reqAttr}>`;
+    html += `<option value="" ${!savedValue ? "selected" : ""}>Select ${escapeHtml(field.label || field.name || field.key)}</option>`;
+    opts.forEach((opt) => {
+      const val = typeof opt === "object" ? (opt.id ?? opt.value ?? opt.name) : opt;
+      const text = typeof opt === "object" ? (opt.name ?? opt.label ?? opt.value) : opt;
+      const sel = String(val) === String(savedValue) ? "selected" : "";
+      html += `<option value="${escapeHtml(val)}" ${sel}>${escapeHtml(text)}</option>`;
+    });
+    html += `</select>`;
+  } else if (field.element === "textarea" || field.element === "longText") {
+    html += `<textarea id="${escapeHtml(fieldId)}" name="${escapeHtml(fieldId)}" ${reqAttr}>${escapeHtml(savedValue)}</textarea>`;
+  } else {
+    const inputType = field.element === "number" ? "number" : field.element === "date" ? "date" : "text";
+    html += `<input type="${inputType}" id="${escapeHtml(fieldId)}" name="${escapeHtml(fieldId)}" value="${escapeHtml(savedValue)}" ${reqAttr} />`;
   }
 
-  fieldHtml += `</select>`;
-  fieldHtml += `<span id="${customField.key}-error-message" class="error-message hidden">${escapeHtml(customField.name) + " cannot be empty"}</span>`;
-  fieldHtml += `</div>`;
+  html += `<span id="${escapeHtml(fieldId)}-error-message" class="error-message hidden">${escapeHtml(field.label || field.name || field.key)} cannot be empty</span>`;
+  html += `</div>`;
 
-  return fieldHtml;
-}
-
-function generateTextCustomField(customField, containerClassName, isRequired) {
-  let fieldHtml = "";
-
-  const ticketCustomFieldValue = window?.PayloadData?.customFields?.[customField.key];
-  let labelName = escapeHtml(customField.name);
-  if (isRequired) labelName += " *";
-
-  fieldHtml += `<div id="${customField.key}-container" class="${containerClassName}">`;
-  fieldHtml += `<label for="${customField.key}">${labelName}</label>`;
-  fieldHtml += `<input type="text" id="${customField.key}" name="${customField.name}" placeholder="${customField.name}" value="${ticketCustomFieldValue || ""}" ${isRequired ? "required" : ""}/>`;
-  fieldHtml += `<span id="${customField.key}-error-message" class="error-message hidden">${escapeHtml(customField.name) + " cannot be empty"}</span>`;
-  fieldHtml += `</div>`;
-
-  return fieldHtml;
-}
-
-function generateDateCustomField(customField, containerClassName, isRequired) {
-  let fieldHtml = "";
-
-  const ticketCustomFieldValue = window?.PayloadData?.customFields?.[customField.key];
-  let labelName = customField.name;
-  if (isRequired) labelName += " *";
-
-  let formattedDate = "";
-  if (ticketCustomFieldValue) {
-    const isoDate = new Date(ticketCustomFieldValue);
-    formattedDate = isoDate.toISOString().split("T")[0];
-  }
-
-  fieldHtml += `<div id="${customField.key}-container" class="${containerClassName}">`;
-  fieldHtml += `<label for="${customField.key}">${labelName}</label>`;
-  fieldHtml += `<input type="date" id="${customField.key}" name="${customField.name}" placeholder="${customField.name}" value="${formattedDate}"/>`;
-  fieldHtml += `<span id="${customField.key}-error-message" class="error-message hidden">${escapeHtml(customField.name) + " cannot be empty"}</span>`;
-  fieldHtml += `</div>`;
-
-  return fieldHtml;
-}
-
-function generateNumberCustomField(customField, containerClassName, isRequired) {
-  let fieldHtml = "";
-
-  const ticketCustomFieldValue = window?.PayloadData?.customFields?.[customField.key];
-  let labelName = customField.name;
-  if (isRequired) labelName += " *";
-
-  fieldHtml += `<div id="${customField.key}-container" class="${containerClassName}">`;
-  fieldHtml += `<label for="${customField.key}">${labelName}</label>`;
-  fieldHtml += `<input type="number" id="${customField.key}" name="${customField.name}" placeholder="${customField.name}" value="${ticketCustomFieldValue || ""}"/>`;
-  fieldHtml += `<span id="${customField.key}-error-message" class="error-message hidden">${escapeHtml(customField.name) + " cannot be empty"}</span>`;
-  fieldHtml += `</div>`;
-
-  return fieldHtml;
+  return html;
 }
