@@ -116,7 +116,15 @@ button:hover {
     transition: border-color 300ms linear, border-width 300ms linear;
     border-color: #007ED4;
 }
+<style>
+  .product-hierarchy-wrapper .hierarchy-step.hidden {
+    display: none;
+  }
 
+  .product-hierarchy-wrapper .hierarchy-step {
+    margin-bottom: 12px;
+  }
+</style>
 
 /* .nested-fields {
     padding-top: 10px;
