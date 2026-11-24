@@ -10,6 +10,146 @@
         "fields": [
           { "key": "h1", "isRequired": true }
         ]
+      },
+       {
+        "value": "Categories of Invoice Dispute",
+        "label": "Categories of Invoice Dispute",
+        "fields": [
+          { "key": "k3", "isRequired": true }
+        ]
+      },
+        {
+        "value": "Loadplan Ticket Type",
+        "label": "Loadplan Ticket Type",
+        "fields": [
+          { "key": "h2", "isRequired": true }
+        ]
+      },
+        {
+        "value": "Customer Operations Ticket Type",
+        "label": "Customer Operations Ticket Type",
+        "fields": [
+          { "key": "h4", "isRequired": true }
+        ]
+      },
+        {
+        "value": "Reservations",
+        "label": "Reservations",
+        "fields": [
+          { "key": "h9", "isRequired": true }
+        ]
+      },
+        {
+        "value": "Care Ticket Type",
+        "label": "Care Ticket Type",
+        "fields": [
+          { "key": "h3", "isRequired": true }
+        ]
+      },
+        {
+        "value": "Claims Ticket Type",
+        "label": "Claims Ticket Type",
+        "fields": [
+          { "key": "h5", "isRequired": true }
+        ]
+      },
+        {
+        "value": "DutyTax Ticket Type",
+        "label": "DutyTax Ticket Type",
+        "fields": [
+          { "key": "h8", "isRequired": true }
+        ]
+      },
+        {
+        "value": "KUL-Ops Ticket Type",
+        "label": "KUL-Ops Ticket Type",
+        "fields": [
+          { "key": "h7", "isRequired": true }
+        ]
+      },
+        {
+        "value": "SIN-Ops Ticket Type",
+        "label": "SIN-Ops Ticket Type",
+        "fields": [
+          { "key": "h6", "isRequired": true }
+        ]
+      },
+        {
+        "value": "Put parent ticket url here",
+        "label": "put parent ticket url here",
+        "fields": [
+          { "key": "s1", "isRequired": true }
+        ]
+      },
+        {
+        "value": "put child ticket url here",
+        "label": "put child ticket url here",
+        "fields": [
+          { "key": "s2", "isRequired": true }
+        ]
+      },
+        {
+        "value": "JIRA ID",
+        "label": "JIRA ID",
+        "fields": [
+          { "key": "s5", "isRequired": true }
+        ]
+      },
+        {
+        "value": "JIRA Priority",
+        "label": "JIRA Priority",
+        "fields": [
+          { "key": "k1", "isRequired": true }
+        ]
+      },
+        {
+        "value": "JIRA Summary",
+        "label": "JIRA Summary",
+        "fields": [
+          { "key": "s3", "isRequired": true }
+        ]
+      },
+        {
+        "value": "JIRA Description",
+        "label": "JIRA Description",
+        "fields": [
+          { "key": "s4", "isRequired": true }
+        ]
+      },
+        {
+        "value": "Fleet Ticket Type",
+        "label": "Fleet Ticket Type",
+        "fields": [
+          { "key": "k2", "isRequired": true }
+        ]
+      },
+        {
+        "value": "Tracing Ticket Type",
+        "label": "Tracing Ticket Type",
+        "fields": [
+          { "key": "h10", "isRequired": true }
+        ]
+      },
+        {
+        "value": "Chat ID",
+        "label": "Chat ID",
+        "fields": [
+          { "key": "s6", "isRequired": true }
+        ]
+      },
+      {
+        "value": "TNXS Sale Support",
+        "label": "TNXS Sale Support",
+        "fields": [
+          { "key": "h11", "isRequired": true }
+        ]
+      },
+      {
+        "value": "CE Ticket Type",
+        "label": "CE Ticket Type",
+        "fields": [
+          { "key": "h12", "isRequired": true }
+        ]
       }
     ]
   },
