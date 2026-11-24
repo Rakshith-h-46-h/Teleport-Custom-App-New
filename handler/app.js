@@ -1,5 +1,6 @@
 import { applyDebugState } from "./components/applyDebugState.js";
 import { renderForm } from "./components/main_form.js";
+import { initChoicesOnSelect } from "./components/util.js";
 
 export let yAppWidget = null;
 
@@ -11,7 +12,6 @@ export let yAppWidget = null;
 
     yAppWidget = new YAppWidget();
 
-    // Load default fraud.json template directly
     const fraudRes = await fetch("./assets/json/fraud.json", { cache: "no-store" });
     if (!fraudRes.ok) {
       throw new Error("Cannot load fraud.json");
@@ -19,21 +19,16 @@ export let yAppWidget = null;
     window.DefaultFieldsData = await fraudRes.json();
     console.log("Loaded: fraud");
 
-    // Apply local debug data, if available
     await applyDebugState(runRenderForm);
 
-    // Fetch ticket and custom field information
     const data = await yAppWidget.ask("ask_ticket_cf_info");
-
     console.log("Received ticket information:", data);
 
     const eventData = data?.eventResponse?.eventData;
-
     if (!eventData) {
       throw new Error("eventData is missing from the platform response");
     }
 
-    // Store platform-provided data
     window.PayloadData = eventData.ticketDetails;
     window.PayloadCustomFields = eventData.customFields;
 
@@ -45,7 +40,6 @@ export let yAppWidget = null;
     }
 
     runRenderForm();
-
   } catch (error) {
     console.error("Error initializing custom app:", error);
   }
@@ -129,9 +123,7 @@ function renderPayloadViewer(fields, containerId = "payload-fields-viewer") {
 }
 
 function runRenderForm() {
-  const messageDisplay = document.getElementById(
-    "ticket-title-forbidden"
-  );
+  const messageDisplay = document.getElementById("ticket-title-forbidden");
 
   if (window.PayloadData && window.PayloadCustomFields) {
     if (messageDisplay) {
@@ -142,26 +134,8 @@ function runRenderForm() {
     renderPayloadViewer(window.PayloadCustomFields);
 
     document.querySelectorAll("#customForm select").forEach((select) => {
-      try {
-        if (typeof Choices !== "undefined") {
-          new Choices(select, {
-            searchEnabled: true,
-            shouldSort: false,
-            itemSelectText: "",
-            searchResultLimit: 9999,
-            renderChoiceLimit: -1,
-            removeItemButton: true,
-            allowHTML: false,
-            fuseOptions: {
-              threshold: 0.3
-            }
-          });
-        }
-      } catch (err) {
-        console.warn("Choices init skipped for select:", select.id, err);
-      }
+      initChoicesOnSelect(select);
     });
-
   } else if (messageDisplay) {
     messageDisplay.innerText = "Loading...";
   }
