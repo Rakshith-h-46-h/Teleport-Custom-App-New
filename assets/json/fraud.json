@@ -12,5 +12,16 @@
       "key": "h4",
       "isRequired": true
     }
-  ]
+  ],
+  "hierarchy": {
+    "Product A": {
+      "Classification A1": ["Subclassification A1-1", "Subclassification A1-2"],
+      "Classification A2": ["Subclassification A2-1"]
+    },
+    "Product B": {
+      "Classification B1": ["Subclassification B1-1", "Subclassification B1-2"],
+      "Classification B2": ["Subclassification B2-1", "Subclassification B2-2"]
+    }
+  },
+  "cases": {}
 }
