@@ -11,6 +11,14 @@ export let yAppWidget = null;
 
     yAppWidget = new YAppWidget();
 
+    // Load default fraud.json template directly
+    const fraudRes = await fetch("./assets/json/fraud.json");
+    if (!fraudRes.ok) {
+      throw new Error("Cannot load fraud.json");
+    }
+    window.DefaultFieldsData = await fraudRes.json();
+    console.log("Loaded: fraud");
+
     // Apply local debug data, if available
     await applyDebugState(runRenderForm);
 
@@ -133,19 +141,25 @@ function runRenderForm() {
     renderForm();
     renderPayloadViewer(window.PayloadCustomFields);
 
-    document.querySelectorAll("#customForm select").forEach(select => {
-      new Choices(select, {
-        searchEnabled: true,
-        shouldSort: false,
-        itemSelectText: "",
-        searchResultLimit: 9999,
-        renderChoiceLimit: -1,
-        removeItemButton: true,
-        allowHTML: false,
-        fuseOptions: {
-          threshold: 0.3
+    document.querySelectorAll("#customForm select").forEach((select) => {
+      try {
+        if (typeof Choices !== "undefined") {
+          new Choices(select, {
+            searchEnabled: true,
+            shouldSort: false,
+            itemSelectText: "",
+            searchResultLimit: 9999,
+            renderChoiceLimit: -1,
+            removeItemButton: true,
+            allowHTML: false,
+            fuseOptions: {
+              threshold: 0.3
+            }
+          });
         }
-      });
+      } catch (err) {
+        console.warn("Choices init skipped for select:", select.id, err);
+      }
     });
 
   } else if (messageDisplay) {
