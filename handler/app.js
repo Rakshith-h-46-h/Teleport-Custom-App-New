@@ -1,102 +1,77 @@
+
 import { applyDebugState } from "./components/applyDebugState.js";
 import { renderForm } from "./components/main_form.js";
 
 export let yAppWidget = null;
 
 (async () => {
-  const { YAppWidget } =
-    await import("https://cdn.yellowmessenger.com/yapps-sdk/v1.0.0/widget.js");
-  yAppWidget = new YAppWidget();
-  await applyDebugState(runRenderForm);
-  yAppWidget
-    .ask("ask_ticket_cf_info")
-    .then(async (data) => {
-      console.log("got an answer back from cloud for ask_ticket_info", data);
+  try {
+    const { YAppWidget } = await import(
+      "https://cdn.yellowmessenger.com/yapps-sdk/v1.0.0/widget.js"
+    );
 
-      window.PayloadData = data.eventResponse.eventData.ticketDetails;
-      window.PayloadCustomFields = data.eventResponse.eventData.customFields;
-      const team = window.PayloadData.customFields.k19;
+    yAppWidget = new YAppWidget();
 
-let fileName = "";
+    // Apply local debug data, if available
+    await applyDebugState(runRenderForm);
 
-switch (team) {
-  case "Fraud":
-    fileName = "fraud";
-    break;
+    // Fetch ticket and custom field information
+    const data = await yAppWidget.ask("ask_ticket_cf_info");
 
-  case "Channel":
-    fileName = "channel";
-    break;
+    console.log("Received ticket information:", data);
 
-  case "Merchant":
-    fileName = "merchant";
-    break;
+    const eventData = data?.eventResponse?.eventData;
 
-  case "Non Fraud":
-    fileName = "non-fraud";
-    break;
+    if (!eventData) {
+      throw new Error("eventData is missing from the platform response");
+    }
 
-  default:
-    console.error("Unknown team:", team);
-    return;
-}
+    // Store platform-provided data
+    window.PayloadData = eventData.ticketDetails;
+    window.PayloadCustomFields = eventData.customFields;
 
-await loadTeamTemplate(fileName);
+    console.log("Ticket details:", window.PayloadData);
+    console.log("Custom fields:", window.PayloadCustomFields);
 
-console.table(
-    window.PayloadCustomFields.map(cf => ({
-        key: cf.key,
-        name: cf.name
-    }))
-);
-    })
-    .catch((e) => {
-      console.log("Error while fetching ask_ticket_cf_info", e);
-    });
+    if (!Array.isArray(window.PayloadCustomFields)) {
+      throw new Error("Custom fields response is not an array");
+    }
+
+    runRenderForm();
+
+  } catch (error) {
+    console.error("Error initializing custom app:", error);
+  }
 })();
 
 function runRenderForm() {
-  const messageDisplay = document.getElementById("ticket-title-forbidden");
-  if (
-    window.PayloadData &&
-    window.PayloadCustomFields
-  ) {
-    messageDisplay.innerText = '';
+  const messageDisplay = document.getElementById(
+    "ticket-title-forbidden"
+  );
+
+  if (window.PayloadData && window.PayloadCustomFields) {
+    if (messageDisplay) {
+      messageDisplay.innerText = "";
+    }
+
     renderForm();
 
-    let selectElements = document.querySelectorAll("select");
-
-    selectElements.forEach(function (selectElement) {
-      new Choices(selectElement, {
-        searchEnabled: true, // Enables the search functionality
+    document.querySelectorAll("#customForm select").forEach(select => {
+      new Choices(select, {
+        searchEnabled: true,
         shouldSort: false,
-                    itemSelectText: '',
-                    searchResultLimit: 9999,
-                    renderChoiceLimit: -1,
-                    removeItemButton: true,
-                    allowHTML: false,
-                    fuseOptions: {
-                        threshold: 0.3
-                    }
+        itemSelectText: "",
+        searchResultLimit: 9999,
+        renderChoiceLimit: -1,
+        removeItemButton: true,
+        allowHTML: false,
+        fuseOptions: {
+          threshold: 0.3
+        }
       });
     });
-  } else {
+
+  } else if (messageDisplay) {
     messageDisplay.innerText = "Loading...";
   }
-}
-
-export async function loadTeamTemplate(fileName) {
-    try {
-        const response = await fetch(`./assets/json/${fileName}.json`);
-
-        console.log("Status:", response.status);
-
-        window.DefaultFieldsData = await response.json();
-
-        console.log("Loaded:", window.DefaultFieldsData);
-
-        runRenderForm();   // ✅ only render after JSON is loaded
-    } catch (error) {
-        console.error(error);
-    }
 }
