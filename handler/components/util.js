@@ -9,6 +9,7 @@ export function generateCustomField(cfKey, containerClassName, isRequired = fals
     else if (customField.element === 'date') fieldHtml += generateDateCustomField(customField, containerClassName, isRequired);
     else if (customField.element === 'number') fieldHtml += generateNumberCustomField(customField, containerClassName, isRequired);
     else if (customField.element === 'shortText') fieldHtml += generateTextCustomField(customField, containerClassName, isRequired);
+    else if (customField.element === 'hierarchicalCustomField') fieldHtml += generateHierarchicalCustomField(customField, containerClassName, isRequired);
   }
 
   return fieldHtml;
