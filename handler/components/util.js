@@ -5,7 +5,7 @@ export function escapeHtml(str) {
     .replaceAll("&", "&")
     .replaceAll("<", "<")
     .replaceAll(">", ">")
-    .replaceAll('"', """)
+    .replaceAll('"', '"')
     .replaceAll("'", "'");
 }
 
