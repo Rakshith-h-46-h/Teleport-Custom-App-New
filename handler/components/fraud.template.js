@@ -1,4 +1,24 @@
-import { generateCustomField, initChoicesOnSelect, escapeHtml } from "./util.js";
+import {
+  generateCustomField,
+  initChoicesOnSelect,
+  destroyChoicesOnSelect,
+  hydratePrefilledHierarchies,
+  escapeHtml
+} from "./util.js";
+
+function initContainerChoices(container) {
+  if (!container) return;
+  container.querySelectorAll("select:not(.hierarchy-select)").forEach((select) => {
+    initChoicesOnSelect(select);
+  });
+}
+
+function destroyContainerChoices(container) {
+  if (!container) return;
+  container.querySelectorAll("select").forEach((select) => {
+    destroyChoicesOnSelect(select);
+  });
+}
 
 export function generateTicketTypeField() {
   const config = window?.DefaultFieldsData?.ticketTypeConfig;
@@ -6,11 +26,12 @@ export function generateTicketTypeField() {
 
   const savedValue = window?.PayloadData?.customFields?.[config.key] || "";
   const label = `${escapeHtml(config.label || "Ticket Type")} *`;
+  const placeholder = config.placeholder || "Select Ticket Type";
 
   let html = `<div id="${escapeHtml(config.key)}-container" class="default-field-container ticket-type-wrapper">`;
   html += `<label for="${escapeHtml(config.key)}">${label}</label>`;
-  html += `<select id="${escapeHtml(config.key)}" name="${escapeHtml(config.key)}" class="dynamic-dropdown" required>`;
-  html += `<option value="" disabled ${!savedValue ? "selected" : ""}>${escapeHtml(config.placeholder || "Select Ticket Type")}</option>`;
+  html += `<select id="${escapeHtml(config.key)}" name="${escapeHtml(config.key)}" class="dynamic-dropdown" data-placeholder="${escapeHtml(placeholder)}" required>`;
+  html += `<option value="" disabled ${!savedValue ? "selected" : ""}>${escapeHtml(placeholder)}</option>`;
 
   config.options.forEach((opt) => {
     const selected = String(opt.value) === String(savedValue) ? "selected" : "";
@@ -28,6 +49,8 @@ export function loadTicketTypeFields(selectedTicketType) {
   const container = document.getElementById("ticketTypeFieldsContainer");
   if (!container) return;
 
+  destroyContainerChoices(container);
+
   const options = window?.DefaultFieldsData?.ticketTypeConfig?.options || [];
   const matchedOption = options.find((opt) => String(opt.value) === String(selectedTicketType));
 
@@ -36,15 +59,12 @@ export function loadTicketTypeFields(selectedTicketType) {
     return;
   }
 
-  const fieldsHtml = matchedOption.fields
+  container.innerHTML = matchedOption.fields
     .map((f) => generateCustomField(f.key, "ticket-type-field-container", Boolean(f.isRequired)))
     .join("");
 
-  container.innerHTML = fieldsHtml;
-
-  container.querySelectorAll("select").forEach((select) => {
-    initChoicesOnSelect(select);
-  });
+  hydratePrefilledHierarchies(container);
+  initContainerChoices(container);
 }
 
 export function addTicketTypeEventListener() {
@@ -116,10 +136,11 @@ export function loadCaseFields(selectedCase) {
   const caseContainer = document.getElementById("caseFieldsContainer");
   if (!caseContainer) return;
 
+  destroyContainerChoices(caseContainer);
+
   const caseHtml = generateCaseFields(selectedCase);
   caseContainer.innerHTML = caseHtml;
 
-  caseContainer.querySelectorAll("select").forEach((select) => {
-    initChoicesOnSelect(select);
-  });
+  hydratePrefilledHierarchies(caseContainer);
+  initContainerChoices(caseContainer);
 }
