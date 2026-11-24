@@ -1,4 +1,4 @@
-import { generateCustomField } from "./util.js";
+import { generateCustomField, initChoicesOnSelect } from "./util.js";
 
 export function generateDefaultFields() {
   let fieldHtml = "";
@@ -12,7 +12,7 @@ export function generateDefaultFields() {
     ? window.DefaultFieldsData.defaultFields
     : [];
 
-  defaultFields.forEach(defaultField => {
+  defaultFields.forEach((defaultField) => {
     fieldHtml += generateCustomField(
       defaultField.key,
       "default-field-container",
@@ -30,7 +30,7 @@ export function generateCaseFields(selectedCase) {
 
   if (!caseFields) return "";
 
-  caseFields.forEach(field => {
+  caseFields.forEach((field) => {
     fieldHtml += generateCustomField(
       field.key,
       "case-field-container",
@@ -46,7 +46,6 @@ export function addDefaultFieldsEventListener() {
   if (!formContainer) return;
 
   formContainer.addEventListener("change", (event) => {
-    // Case dropdown
     if (event.target.id !== "k7") return;
 
     const selectedCase = event.target.value;
@@ -61,19 +60,7 @@ export function loadCaseFields(selectedCase) {
   const caseHtml = generateCaseFields(selectedCase);
   caseContainer.innerHTML = caseHtml;
 
-  // Initialize Choices.js for new dropdowns
-  caseContainer.querySelectorAll("select").forEach(select => {
-    try {
-      if (typeof Choices !== "undefined") {
-        new Choices(select, {
-          searchEnabled: true,
-          shouldSort: false,
-          itemSelectText: "",
-          removeItemButton: true
-        });
-      }
-    } catch (err) {
-      console.warn("Choices init skipped for select:", select.id, err);
-    }
+  caseContainer.querySelectorAll("select").forEach((select) => {
+    initChoicesOnSelect(select);
   });
 }
