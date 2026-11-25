@@ -2,7 +2,7 @@ const choicesInstances = new WeakMap();
 
 export function generateCustomField(cfKey, containerClassName, isRequired = false) {
   let fieldHtml = '';
-
+      
   const customField = window?.PayloadCustomFields?.find(cf => cf.key === cfKey);
  
   if (customField) {
