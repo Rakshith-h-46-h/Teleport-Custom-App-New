@@ -49,6 +49,17 @@ export function getPrefilledHierarchyValues(cfKey) {
   const raw = window?.PayloadData?.customFields?.[cfKey];
   if (raw === undefined || raw === null || raw === "") return [];
 
+  if (raw && typeof raw === "object" && !Array.isArray(raw) && Array.isArray(raw.value)) {
+    return raw.value
+      .map((item) => {
+        if (item && typeof item === "object") {
+          return String(item.id ?? item.value ?? item.name ?? "");
+        }
+        return String(item ?? "");
+      })
+      .filter((v) => v !== "");
+  }
+
   if (Array.isArray(raw)) {
     return raw
       .map((item) => {
@@ -311,40 +322,54 @@ export function collectUpdatedCustomFields(formElement = document.getElementById
   const existing = { ...(window?.PayloadData?.customFields || {}) };
   if (!formElement) return existing;
 
-  const checkedRadios = new Set();
+  Object.keys(existing).forEach((key) => {
+    if (/^h\d+_level_\d+$/.test(key)) {
+      delete existing[key];
+    }
+  });
 
   const controls = formElement.querySelectorAll("input, select, textarea");
   controls.forEach((el) => {
     if (el.classList?.contains("hierarchy-select")) return;
     if (el.classList?.contains("choices__input")) return;
+    if (el.type === "hidden") return;
 
     const rawKey = el.name || el.id;
     if (!rawKey) return;
 
     const cleanKey = rawKey.startsWith("cf_") ? rawKey.slice(3) : rawKey;
+    if (/^h\d+_level_\d+$/.test(cleanKey) || cleanKey === "ticket_type") {
+      return;
+    }
 
     if (el.type === "checkbox") {
-      existing[cleanKey] = Boolean(el.checked);
+      existing[cleanKey] = el.checked ? "true" : "false";
     } else if (el.type === "radio") {
       if (el.checked) {
-        existing[cleanKey] = el.value;
-        checkedRadios.add(cleanKey);
-      } else if (!checkedRadios.has(cleanKey) && !(cleanKey in existing)) {
-        existing[cleanKey] = "";
+        existing[cleanKey] = String(el.value ?? "").trim();
       }
     } else if (el.tagName === "SELECT") {
       const choicesInstance = choicesInstances.get(el);
-      const val =
-        choicesInstance && typeof choicesInstance.getValue === "function"
-          ? (() => {
-              const v = choicesInstance.getValue(true);
-              return Array.isArray(v) ? v[0] ?? "" : v ?? el.value ?? "";
-            })()
-          : el.value ?? "";
+      let val = el.value ?? "";
 
-      existing[cleanKey] = String(val);
+      if (choicesInstance && typeof choicesInstance.getValue === "function") {
+        const picked = choicesInstance.getValue(true);
+        val = Array.isArray(picked) ? (picked[0] ?? val) : (picked ?? val);
+      }
+
+      const trimmed = String(val ?? "").trim();
+      if (trimmed !== "") {
+        existing[cleanKey] = trimmed;
+      } else {
+        delete existing[cleanKey];
+      }
     } else {
-      existing[cleanKey] = el.value ?? "";
+      const trimmed = String(el.value ?? "").trim();
+      if (trimmed !== "") {
+        existing[cleanKey] = trimmed;
+      } else {
+        delete existing[cleanKey];
+      }
     }
   });
 
@@ -353,11 +378,19 @@ export function collectUpdatedCustomFields(formElement = document.getElementById
     const cfKey = group.getAttribute("data-hierarchy-key");
     if (!cfKey) return;
 
+    const fieldConfig = getCustomFieldConfig(cfKey);
+    const levels = Array.isArray(fieldConfig?.levels) ? fieldConfig.levels : [];
+    const fieldDisplayName =
+      fieldConfig?.name ||
+      fieldConfig?.label ||
+      (typeof existing[cfKey] === "object" && existing[cfKey]?.name) ||
+      cfKey;
+
     const levelSelects = Array.from(group.querySelectorAll("select.hierarchy-select")).sort(
       (a, b) => Number(a.dataset.levelIndex || 0) - Number(b.dataset.levelIndex || 0)
     );
 
-    const selectedValues = levelSelects
+    const selectedEntries = levelSelects
       .map((sel) => {
         const wrapper = sel.closest(".hierarchy-level-item");
         const isHidden =
@@ -365,14 +398,54 @@ export function collectUpdatedCustomFields(formElement = document.getElementById
           wrapper?.style?.display === "none";
         if (isHidden) return null;
 
-        return sel.value ? String(sel.value) : null;
-      })
-      .filter((val) => val !== null);
+        const choicesInstance = choicesInstances.get(sel);
+        let selectedId = sel.value ?? "";
+        if (choicesInstance && typeof choicesInstance.getValue === "function") {
+          const picked = choicesInstance.getValue(true);
+          selectedId = Array.isArray(picked) ? (picked[0] ?? selectedId) : (picked ?? selectedId);
+        }
 
-    if (selectedValues.length > 0) {
-      existing[cfKey] = selectedValues;
+        selectedId = String(selectedId ?? "").trim();
+        if (!selectedId) return null;
+
+        const levelIdx = Number(sel.dataset.levelIndex || 0);
+        const levelName = levels[levelIdx] || `Level ${levelIdx + 1}`;
+        const levelOptions = Array.isArray(fieldConfig?.options?.[levelIdx])
+          ? fieldConfig.options[levelIdx]
+          : [];
+        const matchedOpt = levelOptions.find((opt) => String(opt?.id) === selectedId);
+
+        const optionName = matchedOpt?.name
+          ? String(matchedOpt.name).trim()
+          : (sel.selectedOptions?.[0]?.textContent || "").trim();
+
+        return {
+          id: selectedId,
+          levelName,
+          name: optionName
+        };
+      })
+      .filter((entry) => entry !== null);
+
+    if (selectedEntries.length > 0) {
+      existing[cfKey] = {
+        name: fieldDisplayName,
+        value: selectedEntries
+      };
+    } else {
+      delete existing[cfKey];
     }
+
+    Object.keys(existing).forEach((k) => {
+      if (new RegExp(`^${cfKey}_level_\\d+$`).test(k)) {
+        delete existing[k];
+      }
+    });
   });
+
+  if (window?.PayloadData?.customFields?.k19) {
+    existing.k19 = String(window.PayloadData.customFields.k19);
+  }
 
   return existing;
 }
