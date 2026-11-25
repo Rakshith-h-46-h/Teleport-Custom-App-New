@@ -1,3 +1,5 @@
+const choicesInstances = new WeakMap();
+
 export function generateCustomField(cfKey, containerClassName, isRequired = false) {
   let fieldHtml = '';
 
@@ -20,12 +22,163 @@ export function generateCustomField(cfKey, containerClassName, isRequired = fals
   return fieldHtml;
 }
 
+export function initChoicesOnSelect(selectElement) {
+  if (!selectElement || selectElement.tagName !== 'SELECT') return null;
+
+  // Avoid double-initializing
+  if (choicesInstances.has(selectElement)) {
+    return choicesInstances.get(selectElement);
+  }
+
+  if (typeof window.Choices === 'function') {
+    const instance = new window.Choices(selectElement, {
+      searchEnabled: true,
+      shouldSort: false,
+      itemSelectText: '',
+      removeItemButton: false
+    });
+    choicesInstances.set(selectElement, instance);
+    return instance;
+  }
+
+  return null;
+}
+
+export function destroyChoicesOnSelect(selectElement) {
+  if (!selectElement) return;
+
+  const instance = choicesInstances.get(selectElement) || selectElement._choicesInstance;
+  if (instance && typeof instance.destroy === 'function') {
+    instance.destroy();
+  }
+  choicesInstances.delete(selectElement);
+  if (selectElement._choicesInstance) {
+    delete selectElement._choicesInstance;
+  }
+}
+
+export function hydratePrefilledHierarchies(rootElement = document) {
+  if (!rootElement) return;
+
+  const containers = rootElement.querySelectorAll('.hierarchy-field-container');
+  containers.forEach((container) => {
+    const cfKey = container.dataset.fieldKey;
+    if (!cfKey) return;
+
+    const customField = window?.PayloadCustomFields?.find(cf => cf.key === cfKey);
+    if (!customField) return;
+
+    const rawValue = getCustomFieldValue(cfKey);
+    const treeRoot = getTreeRoot(customField);
+    const levels = normalizeHierarchyLevels(customField, treeRoot);
+    const selectedPath = extractSelectedPath(rawValue, levels, treeRoot);
+
+    const selects = Array.from(container.querySelectorAll('.dynamic-hierarchy-select'));
+    selects.forEach((sel, idx) => {
+      destroyChoicesOnSelect(sel);
+
+      const level = levels[idx] || { label: `${customField.name} - Level ${idx + 1}`, options: [] };
+      const selectedObj = Array.isArray(rawValue) ? rawValue[idx] : null;
+      const levelLabelText =
+        (selectedObj && typeof selectedObj === 'object' && selectedObj.levelName) ||
+        level.label ||
+        `${customField.name} - Level ${idx + 1}`;
+
+      const levelOptions = getOptionsForLevel(level, idx, selectedPath, treeRoot);
+      const currentVal = selectedPath[idx] ?? '';
+      const hasMatch =
+        currentVal !== '' && levelOptions.some(opt => getOptionValue(opt) === currentVal);
+      const hasInvalid = currentVal !== '' && !hasMatch;
+      const placeholderSelected = !hasMatch && !hasInvalid ? ' selected' : '';
+
+      const invalidLabel =
+        selectedObj && typeof selectedObj === 'object' && selectedObj.name
+          ? selectedObj.name
+          : currentVal;
+
+      sel.dataset.levelName = levelLabelText;
+
+      let optionsHtml = `<option value="" disabled${placeholderSelected}>Select ${escapeHtml(levelLabelText)}</option>`;
+      for (const opt of levelOptions) {
+        const optVal = getOptionValue(opt);
+        const optText = getOptionLabel(opt);
+        const selected = optVal === currentVal ? ' selected' : '';
+        optionsHtml += `<option value="${escapeHtml(optVal)}"${selected}>${escapeHtml(optText)}</option>`;
+      }
+
+      if (hasInvalid) {
+        optionsHtml += `<option value="${escapeHtml(currentVal)}" selected disabled>${escapeHtml(invalidLabel)}</option>`;
+      }
+
+      sel.innerHTML = optionsHtml;
+      initChoicesOnSelect(sel);
+    });
+
+    syncHiddenHierarchyInput(container, cfKey, customField);
+  });
+}
+
 function getCustomFieldValue(cfKey) {
   const raw = window?.PayloadData?.customFields?.[cfKey];
   if (raw && typeof raw === 'object' && !Array.isArray(raw) && 'value' in raw) {
     return raw.value;
   }
   return raw;
+}
+
+function getTreeRoot(customField) {
+  return (
+    customField.options ||
+    customField.children ||
+    customField.hierarchy ||
+    customField.radiobuttons ||
+    []
+  );
+}
+
+function extractSelectedPath(rawValue, levels, treeRoot) {
+  if (Array.isArray(rawValue)) {
+    return rawValue.map(item =>
+      typeof item === 'object' && item !== null ? String(item.id ?? item.value ?? '') : String(item)
+    );
+  }
+  return resolveSelectedHierarchyPath(rawValue, levels, treeRoot);
+}
+
+function syncHiddenHierarchyInput(container, cfKey, customField) {
+  const hiddenInput = document.getElementById(cfKey);
+  if (!hiddenInput) return;
+
+  const allSelects = Array.from(container.querySelectorAll('.dynamic-hierarchy-select'));
+  const updatedPathValue = [];
+
+  allSelects.forEach((sel, idx) => {
+    if (sel.value) {
+      const selectedOption = sel.options[sel.selectedIndex];
+      updatedPathValue.push({
+        id: sel.value,
+        levelName: sel.dataset.levelName || customField?.levels?.[idx]?.label || `Level ${idx + 1}`,
+        name: selectedOption ? selectedOption.textContent : sel.value
+      });
+    }
+  });
+
+  window.PayloadData = window.PayloadData || {};
+  window.PayloadData.customFields = window.PayloadData.customFields || {};
+
+  const existingFieldData = window.PayloadData.customFields[cfKey];
+  if (
+    existingFieldData &&
+    typeof existingFieldData === 'object' &&
+    !Array.isArray(existingFieldData) &&
+    'value' in existingFieldData
+  ) {
+    existingFieldData.value = updatedPathValue;
+  } else {
+    window.PayloadData.customFields[cfKey] = updatedPathValue;
+  }
+
+  hiddenInput.value = JSON.stringify(updatedPathValue);
 }
 
 function generateDropdownCustomField(customField, containerClassName, isRequired) {
@@ -63,7 +216,6 @@ function generateDropdownCustomField(customField, containerClassName, isRequired
     fieldHtml += `<option value="${escapeHtml(option)}"${isSelected}>${escapeHtml(option)}</option>`;
   }
 
-  // Keep invalid existing values so saving without changing this field preserves them
   if (hasInvalidValue) {
     fieldHtml += `<option value="${escapeHtml(ticketCustomFieldValue)}" selected disabled>${escapeHtml(ticketCustomFieldValue)}</option>`;
   }
@@ -158,20 +310,9 @@ function generateHierarchicalCustomField(customField, containerClassName, isRequ
   const requiredAttr = isRequired ? ' required' : '';
 
   const rawValue = getCustomFieldValue(customField.key);
-  const treeRoot =
-    customField.options ||
-    customField.children ||
-    customField.hierarchy ||
-    customField.radiobuttons ||
-    [];
-
+  const treeRoot = getTreeRoot(customField);
   const levels = normalizeHierarchyLevels(customField, treeRoot);
-
-  const selectedPath = Array.isArray(rawValue)
-    ? rawValue.map(item =>
-        typeof item === 'object' && item !== null ? String(item.id ?? item.value ?? '') : String(item)
-      )
-    : resolveSelectedHierarchyPath(rawValue, levels, treeRoot);
+  const selectedPath = extractSelectedPath(rawValue, levels, treeRoot);
 
   let levelsHtml = '';
 
@@ -198,7 +339,7 @@ function generateHierarchicalCustomField(customField, containerClassName, isRequ
 
     levelsHtml += `<div class="hierarchy-level" data-level-index="${idx}">`;
     levelsHtml += `<label for="${levelId}">${levelLabel}</label>`;
-    levelsHtml += `<select id="${levelId}" data-hierarchy-key="${safeKey}" data-level-index="${idx}" data-level-name="${escapeHtml(levelLabelText)}" class="dynamic-dropdown dynamic-hierarchy-select"${requiredAttr}>`;
+    levelsHtml += `<select id="${levelId}" data-hierarchy-key="${safeKey}" data-level-index="${idx}" data-level-name="${escapeHtml(levelLabelText)}" class="dynamic-dropdown dynamic-hierarchy-select hierarchy-select"${requiredAttr}>`;
     levelsHtml += `<option value="" disabled${placeholderSelected}>Select ${levelLabel}</option>`;
 
     for (const opt of levelOptions) {
@@ -374,15 +515,16 @@ document.addEventListener('change', (event) => {
   window.PayloadData.customFields = window.PayloadData.customFields || {};
 
   const existingFieldData = window.PayloadData.customFields[cfKey];
-  if (existingFieldData && typeof existingFieldData === 'object' && !Array.isArray(existingFieldData) && 'value' in existingFieldData) {
+  if (
+    existingFieldData &&
+    typeof existingFieldData === 'object' &&
+    !Array.isArray(existingFieldData) &&
+    'value' in existingFieldData
+  ) {
     existingFieldData.value = updatedPathValue;
   } else {
     window.PayloadData.customFields[cfKey] = updatedPathValue;
   }
 
-  const preserveClasses = Array.from(container.classList)
-    .filter(c => c !== 'hierarchy-field-container')
-    .join(' ');
-
-  container.outerHTML = generateCustomField(cfKey, preserveClasses, Boolean(hiddenInput.required));
+  hydratePrefilledHierarchies(container.parentElement || document);
 });
