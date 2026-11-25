@@ -14,7 +14,11 @@ export function generateCustomField(cfKey, containerClassName, isRequired = fals
       fieldHtml += generateDateCustomField(customField, containerClassName, isRequired);
     } else if (customField.element === 'number') {
       fieldHtml += generateNumberCustomField(customField, containerClassName, isRequired);
-    } else if (customField.element === 'hierarchical' || customField.element === 'hierarchy') {
+    } else if (
+      customField.element === 'hierarchical' ||
+      customField.element === 'hierarchy' ||
+      customField.element === 'hierarchicalCustomField'
+    ) {
       fieldHtml += generateHierarchicalCustomField(customField, containerClassName, isRequired);
     }
   }
@@ -76,12 +80,12 @@ export function hydratePrefilledHierarchies(rootElement = document) {
     selects.forEach((sel, idx) => {
       destroyChoicesOnSelect(sel);
 
-      const level = levels[idx] || { label: `${customField.name} - Level ${idx + 1}`, options: [] };
+      const level = levels[idx] || { label: `${customField.name || customField.label || 'Hierarchy'} - Level ${idx + 1}`, options: [] };
       const selectedObj = Array.isArray(rawValue) ? rawValue[idx] : null;
       const levelLabelText =
         (selectedObj && typeof selectedObj === 'object' && selectedObj.levelName) ||
         level.label ||
-        `${customField.name} - Level ${idx + 1}`;
+        `${customField.name || customField.label || 'Hierarchy'} - Level ${idx + 1}`;
 
       const levelOptions = getOptionsForLevel(level, idx, selectedPath, treeRoot);
       const currentVal = selectedPath[idx] ?? '';
@@ -159,7 +163,7 @@ function syncHiddenHierarchyInput(container, cfKey, customField) {
       const selectedOption = sel.options[sel.selectedIndex];
       updatedPathValue.push({
         id: sel.value,
-        levelName: sel.dataset.levelName || customField?.levels?.[idx]?.label || `Level ${idx + 1}`,
+        levelName: sel.dataset.levelName || customField?.levels?.[idx]?.label || customField?.levels?.[idx] || `Level ${idx + 1}`,
         name: selectedOption ? selectedOption.textContent : sel.value
       });
     }
@@ -187,7 +191,7 @@ function generateDropdownCustomField(customField, containerClassName, isRequired
   let fieldHtml = '';
 
   const ticketCustomFieldValue = getCustomFieldValue(customField.key);
-  const safeName = escapeHtml(customField.name);
+  const safeName = escapeHtml(customField.name || customField.label || customField.key);
   const safeKey = escapeHtml(customField.key);
   const safeClass = escapeHtml(containerClassName || '');
   const labelName = isRequired ? `${safeName} *` : safeName;
@@ -233,7 +237,7 @@ function generateTextCustomField(customField, containerClassName, isRequired) {
   let fieldHtml = '';
 
   const ticketCustomFieldValue = getCustomFieldValue(customField.key);
-  const safeName = escapeHtml(customField.name);
+  const safeName = escapeHtml(customField.name || customField.label || customField.key);
   const safeKey = escapeHtml(customField.key);
   const safeClass = escapeHtml(containerClassName || '');
   const labelName = isRequired ? `${safeName} *` : safeName;
@@ -256,7 +260,7 @@ function generateDateCustomField(customField, containerClassName, isRequired) {
   let fieldHtml = '';
 
   const ticketCustomFieldValue = getCustomFieldValue(customField.key);
-  const safeName = escapeHtml(customField.name);
+  const safeName = escapeHtml(customField.name || customField.label || customField.key);
   const safeKey = escapeHtml(customField.key);
   const safeClass = escapeHtml(containerClassName || '');
   const labelName = isRequired ? `${safeName} *` : safeName;
@@ -283,7 +287,7 @@ function generateNumberCustomField(customField, containerClassName, isRequired) 
   let fieldHtml = '';
 
   const ticketCustomFieldValue = getCustomFieldValue(customField.key);
-  const safeName = escapeHtml(customField.name);
+  const safeName = escapeHtml(customField.name || customField.label || customField.key);
   const safeKey = escapeHtml(customField.key);
   const safeClass = escapeHtml(containerClassName || '');
   const labelName = isRequired ? `${safeName} *` : safeName;
@@ -306,7 +310,7 @@ function generateNumberCustomField(customField, containerClassName, isRequired) 
 
 function generateHierarchicalCustomField(customField, containerClassName, isRequired) {
   const safeKey = escapeHtml(customField.key);
-  const safeName = escapeHtml(customField.name);
+  const safeName = escapeHtml(customField.name || customField.label || customField.key);
   const safeClass = escapeHtml(containerClassName || '');
   const labelName = isRequired ? `${safeName} *` : safeName;
   const requiredAttr = isRequired ? ' required' : '';
@@ -324,7 +328,7 @@ function generateHierarchicalCustomField(customField, containerClassName, isRequ
     const levelLabelText =
       (selectedObj && typeof selectedObj === 'object' && selectedObj.levelName) ||
       level.label ||
-      `${customField.name} - Level ${idx + 1}`;
+      `${customField.name || customField.label || 'Hierarchy'} - Level ${idx + 1}`;
     const levelLabel = escapeHtml(levelLabelText);
 
     const levelOptions = getOptionsForLevel(level, idx, selectedPath, treeRoot);
@@ -378,23 +382,42 @@ function generateHierarchicalCustomField(customField, containerClassName, isRequ
 }
 
 function normalizeHierarchyLevels(customField, treeRoot) {
-  if (Array.isArray(customField?.levels) && customField.levels.length > 0) {
-    return customField.levels;
-  }
-
   const rawValue = getCustomFieldValue(customField?.key);
   const savedCount = Array.isArray(rawValue) ? rawValue.length : 0;
-  const depth = Math.max(1, getMaxTreeDepth(treeRoot), savedCount);
 
+  const isLevelBuckets =
+    Array.isArray(treeRoot) &&
+    treeRoot.length > 0 &&
+    Array.isArray(treeRoot[0]);
+
+  const bucketCount = isLevelBuckets
+    ? treeRoot.filter(arr => Array.isArray(arr) && arr.length > 0).length
+    : 0;
+
+  if (Array.isArray(customField?.levels) && customField.levels.length > 0) {
+    const count = Math.max(customField.levels.length, bucketCount, savedCount, 1);
+    return Array.from({ length: count }, (_, idx) => {
+      const lvl = customField.levels[idx];
+      const savedItem = Array.isArray(rawValue) ? rawValue[idx] : null;
+      const label =
+        (typeof lvl === 'string' ? lvl : lvl?.label) ||
+        savedItem?.levelName ||
+        `${customField?.name || customField?.label || 'Hierarchy'} - Level ${idx + 1}`;
+      return {
+        label,
+        options: typeof lvl === 'object' && Array.isArray(lvl?.options) ? lvl.options : []
+      };
+    });
+  }
+
+  const depth = Math.max(1, bucketCount || getMaxTreeDepth(treeRoot), savedCount);
   return Array.from({ length: depth }, (_, idx) => {
     const savedItem = Array.isArray(rawValue) ? rawValue[idx] : null;
-    const label =
-      savedItem?.levelName ||
-      customField?.levelNames?.[idx] ||
-      `${customField?.name || 'Hierarchy'} - Level ${idx + 1}`;
     return {
-      label,
-      options: idx === 0 ? treeRoot : []
+      label:
+        savedItem?.levelName ||
+        `${customField?.name || customField?.label || 'Hierarchy'} - Level ${idx + 1}`,
+      options: []
     };
   });
 }
@@ -412,29 +435,43 @@ function getMaxTreeDepth(nodes) {
 }
 
 function getOptionsForLevel(level, levelIndex, selectedPath, treeRoot) {
+  const isLevelBuckets =
+    Array.isArray(treeRoot) &&
+    treeRoot.length > 0 &&
+    Array.isArray(treeRoot[0]);
+
+  if (isLevelBuckets) {
+    const bucket = Array.isArray(treeRoot[levelIndex]) ? treeRoot[levelIndex] : [];
+    if (levelIndex === 0) {
+      return bucket;
+    }
+
+    const parentValue = selectedPath[levelIndex - 1];
+    if (!parentValue) {
+      return [];
+    }
+
+    return bucket.filter(item => {
+      const parentId =
+        typeof item === 'object' && item !== null
+          ? (item.parent ?? item.parentId ?? item.parentValue ?? null)
+          : null;
+      return parentId !== null && String(parentId) === String(parentValue);
+    });
+  }
+
   if (levelIndex === 0) {
-    if (Array.isArray(treeRoot) && treeRoot.length > 0) return treeRoot;
-    if (Array.isArray(level?.options) && level.options.length > 0) return level.options;
-    return [];
+    return Array.isArray(treeRoot) && treeRoot.length > 0 ? treeRoot : (level?.options || []);
   }
 
   const parentValue = selectedPath[levelIndex - 1];
   if (!parentValue) {
-    return Array.isArray(level?.options) ? level.options : [];
+    return [];
   }
 
   const parentNode = findNodeByValue(treeRoot, parentValue);
   const childNodes = parentNode?.children || parentNode?.options || parentNode?.subOptions || [];
-
-  if (Array.isArray(childNodes) && childNodes.length > 0) {
-    return childNodes;
-  }
-
-  if (Array.isArray(level?.options) && level.options.length > 0) {
-    return level.options.filter(opt => !opt.parentValue || opt.parentValue === parentValue);
-  }
-
-  return [];
+  return Array.isArray(childNodes) ? childNodes : [];
 }
 
 function findNodeByValue(nodes, targetValue) {
@@ -456,12 +493,37 @@ function resolveSelectedHierarchyPath(rawValue, levels, treeRoot) {
     return [];
   }
 
+  const isLevelBuckets =
+    Array.isArray(treeRoot) &&
+    treeRoot.length > 0 &&
+    Array.isArray(treeRoot[0]);
+
+  if (isLevelBuckets) {
+    for (let lvlIdx = treeRoot.length - 1; lvlIdx >= 0; lvlIdx--) {
+      const bucket = Array.isArray(treeRoot[lvlIdx]) ? treeRoot[lvlIdx] : [];
+      const current = bucket.find(node => getOptionValue(node) === String(rawValue));
+      if (current) {
+        const path = Array(lvlIdx + 1).fill('');
+        path[lvlIdx] = getOptionValue(current);
+        let parentId = current.parent ?? current.parentId ?? null;
+        for (let upIdx = lvlIdx - 1; upIdx >= 0 && parentId; upIdx--) {
+          const parentBucket = Array.isArray(treeRoot[upIdx]) ? treeRoot[upIdx] : [];
+          const parentNode = parentBucket.find(n => getOptionValue(n) === String(parentId));
+          if (!parentNode) break;
+          path[upIdx] = getOptionValue(parentNode);
+          parentId = parentNode.parent ?? parentNode.parentId ?? null;
+        }
+        return path;
+      }
+    }
+  }
+
   const path = findPathToValue(treeRoot, rawValue);
   if (path.length > 0) {
     return path;
   }
 
-  return levels.length > 1 ? [...Array(levels.length - 1).fill(''), rawValue] : [rawValue];
+  return levels.length > 1 ? [...Array(levels.length - 1).fill(''), String(rawValue)] : [String(rawValue)];
 }
 
 function findPathToValue(nodes, targetValue, currentPath = []) {
@@ -518,7 +580,7 @@ export function collectUpdatedCustomFields(rootElement = document) {
         const selectedOption = sel.options[sel.selectedIndex];
         pathValue.push({
           id: sel.value,
-          levelName: sel.dataset.levelName || customField?.levels?.[idx]?.label || `Level ${idx + 1}`,
+          levelName: sel.dataset.levelName || customField?.levels?.[idx]?.label || customField?.levels?.[idx] || `Level ${idx + 1}`,
           name: selectedOption ? selectedOption.textContent : sel.value
         });
       }
@@ -583,7 +645,7 @@ export function bindProductHierarchyEvents(rootElement = document) {
         const selectedOption = sel.options[sel.selectedIndex];
         updatedPathValue.push({
           id: sel.value,
-          levelName: sel.dataset.levelName || customField?.levels?.[idx]?.label || `Level ${idx + 1}`,
+          levelName: sel.dataset.levelName || customField?.levels?.[idx]?.label || customField?.levels?.[idx] || `Level ${idx + 1}`,
           name: selectedOption ? selectedOption.textContent : sel.value
         });
       }
