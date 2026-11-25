@@ -50,14 +50,96 @@ export function initChoicesOnSelect(selectElement) {
 export function destroyChoicesOnSelect(selectElement) {
   if (!selectElement) return;
 
+  const existingWrappers = selectElement.parentElement?.querySelectorAll('.choices');
   const instance = choicesInstances.get(selectElement) || selectElement._choicesInstance;
+
   if (instance && typeof instance.destroy === 'function') {
-    instance.destroy();
+    try {
+      instance.destroy();
+    } catch (_) {
+      // Ignore if DOM nodes were already replaced
+    }
   }
+
+  if (existingWrappers && existingWrappers.length > 0) {
+    existingWrappers.forEach(wrapper => {
+      if (wrapper.contains(selectElement)) {
+        wrapper.parentNode?.insertBefore(selectElement, wrapper);
+      }
+      wrapper.remove();
+    });
+  }
+
   choicesInstances.delete(selectElement);
   if (selectElement._choicesInstance) {
     delete selectElement._choicesInstance;
   }
+}
+
+function buildHierarchyLevelsHtml(customField, rawValue, treeRoot, levels, selectedPath, requiredAttr) {
+  const safeKey = escapeHtml(customField.key);
+  let levelsHtml = '';
+
+  for (let idx = 0; idx < levels.length; idx++) {
+    const level = levels[idx] || {
+      label: `${customField.name || customField.label || 'Hierarchy'} - Level ${idx + 1}`,
+      options: []
+    };
+
+    const currentVal = selectedPath[idx] ?? '';
+    const hasParentSelection = idx === 0 || Boolean(selectedPath[idx - 1]);
+
+    // If this is a child level and no parent is selected yet, don't render it
+    if (idx > 0 && !hasParentSelection) {
+      break;
+    }
+
+    const levelOptions = getOptionsForLevel(level, idx, selectedPath, treeRoot);
+    const hasMatch =
+      currentVal !== '' && levelOptions.some(opt => getOptionValue(opt) === currentVal);
+    const hasInvalid = currentVal !== '' && !hasMatch;
+
+    // Only render child levels when they actually have options (or a saved/invalid value)
+    const shouldRenderLevel = idx === 0 || levelOptions.length > 0 || hasInvalid;
+    if (!shouldRenderLevel) {
+      break;
+    }
+
+    const levelId = `${safeKey}-level-${idx}`;
+    const selectedObj = Array.isArray(rawValue) ? rawValue[idx] : null;
+    const levelLabelText =
+      (selectedObj && typeof selectedObj === 'object' && selectedObj.levelName) ||
+      level.label ||
+      `${customField.name || customField.label || 'Hierarchy'} - Level ${idx + 1}`;
+    const levelLabel = escapeHtml(levelLabelText);
+
+    const placeholderSelected = !hasMatch && !hasInvalid ? ' selected' : '';
+    const invalidLabel =
+      selectedObj && typeof selectedObj === 'object' && selectedObj.name
+        ? selectedObj.name
+        : currentVal;
+
+    levelsHtml += `<div class="hierarchy-level" data-level-index="${idx}">`;
+    levelsHtml += `<label for="${levelId}">${levelLabel}</label>`;
+    levelsHtml += `<select id="${levelId}" data-hierarchy-key="${safeKey}" data-level-index="${idx}" data-level-name="${escapeHtml(levelLabelText)}" class="dynamic-dropdown dynamic-hierarchy-select hierarchy-select"${requiredAttr}>`;
+    levelsHtml += `<option value="" disabled${placeholderSelected}>Select ${levelLabel}</option>`;
+
+    for (const opt of levelOptions) {
+      const optVal = getOptionValue(opt);
+      const optText = getOptionLabel(opt);
+      const selected = optVal === currentVal ? ' selected' : '';
+      levelsHtml += `<option value="${escapeHtml(optVal)}"${selected}>${escapeHtml(optText)}</option>`;
+    }
+
+    if (hasInvalid) {
+      levelsHtml += `<option value="${escapeHtml(currentVal)}" selected disabled>${escapeHtml(invalidLabel)}</option>`;
+    }
+
+    levelsHtml += `</select>`;
+    levelsHtml += `</div>`;
+  }
+
+  return levelsHtml;
 }
 
 export function hydratePrefilledHierarchies(rootElement = document) {
@@ -71,51 +153,33 @@ export function hydratePrefilledHierarchies(rootElement = document) {
     const customField = window?.PayloadCustomFields?.find(cf => cf.key === cfKey);
     if (!customField) return;
 
+    const levelsWrapper =
+      container.querySelector(`#${CSS.escape(cfKey)}-levels`) ||
+      container.querySelector('.hierarchy-levels-wrapper');
+    if (!levelsWrapper) return;
+
+    const existingSelects = Array.from(levelsWrapper.querySelectorAll('.dynamic-hierarchy-select'));
+    existingSelects.forEach(sel => destroyChoicesOnSelect(sel));
+
     const rawValue = getCustomFieldValue(cfKey);
     const treeRoot = getTreeRoot(customField);
     const levels = normalizeHierarchyLevels(customField, treeRoot);
     const selectedPath = extractSelectedPath(rawValue, levels, treeRoot);
+    const requiredAttr = container.querySelector('input[type="hidden"]')?.hasAttribute('required')
+      ? ' required'
+      : '';
 
-    const selects = Array.from(container.querySelectorAll('.dynamic-hierarchy-select'));
-    selects.forEach((sel, idx) => {
-      destroyChoicesOnSelect(sel);
+    levelsWrapper.innerHTML = buildHierarchyLevelsHtml(
+      customField,
+      rawValue,
+      treeRoot,
+      levels,
+      selectedPath,
+      requiredAttr
+    );
 
-      const level = levels[idx] || { label: `${customField.name || customField.label || 'Hierarchy'} - Level ${idx + 1}`, options: [] };
-      const selectedObj = Array.isArray(rawValue) ? rawValue[idx] : null;
-      const levelLabelText =
-        (selectedObj && typeof selectedObj === 'object' && selectedObj.levelName) ||
-        level.label ||
-        `${customField.name || customField.label || 'Hierarchy'} - Level ${idx + 1}`;
-
-      const levelOptions = getOptionsForLevel(level, idx, selectedPath, treeRoot);
-      const currentVal = selectedPath[idx] ?? '';
-      const hasMatch =
-        currentVal !== '' && levelOptions.some(opt => getOptionValue(opt) === currentVal);
-      const hasInvalid = currentVal !== '' && !hasMatch;
-      const placeholderSelected = !hasMatch && !hasInvalid ? ' selected' : '';
-
-      const invalidLabel =
-        selectedObj && typeof selectedObj === 'object' && selectedObj.name
-          ? selectedObj.name
-          : currentVal;
-
-      sel.dataset.levelName = levelLabelText;
-
-      let optionsHtml = `<option value="" disabled${placeholderSelected}>Select ${escapeHtml(levelLabelText)}</option>`;
-      for (const opt of levelOptions) {
-        const optVal = getOptionValue(opt);
-        const optText = getOptionLabel(opt);
-        const selected = optVal === currentVal ? ' selected' : '';
-        optionsHtml += `<option value="${escapeHtml(optVal)}"${selected}>${escapeHtml(optText)}</option>`;
-      }
-
-      if (hasInvalid) {
-        optionsHtml += `<option value="${escapeHtml(currentVal)}" selected disabled>${escapeHtml(invalidLabel)}</option>`;
-      }
-
-      sel.innerHTML = optionsHtml;
-      initChoicesOnSelect(sel);
-    });
+    const newSelects = Array.from(levelsWrapper.querySelectorAll('.dynamic-hierarchy-select'));
+    newSelects.forEach(sel => initChoicesOnSelect(sel));
 
     syncHiddenHierarchyInput(container, cfKey, customField);
   });
@@ -163,7 +227,11 @@ function syncHiddenHierarchyInput(container, cfKey, customField) {
       const selectedOption = sel.options[sel.selectedIndex];
       updatedPathValue.push({
         id: sel.value,
-        levelName: sel.dataset.levelName || customField?.levels?.[idx]?.label || customField?.levels?.[idx] || `Level ${idx + 1}`,
+        levelName:
+          sel.dataset.levelName ||
+          customField?.levels?.[idx]?.label ||
+          customField?.levels?.[idx] ||
+          `Level ${idx + 1}`,
         name: selectedOption ? selectedOption.textContent : sel.value
       });
     }
@@ -320,48 +388,14 @@ function generateHierarchicalCustomField(customField, containerClassName, isRequ
   const levels = normalizeHierarchyLevels(customField, treeRoot);
   const selectedPath = extractSelectedPath(rawValue, levels, treeRoot);
 
-  let levelsHtml = '';
-
-  levels.forEach((level, idx) => {
-    const levelId = `${safeKey}-level-${idx}`;
-    const selectedObj = Array.isArray(rawValue) ? rawValue[idx] : null;
-    const levelLabelText =
-      (selectedObj && typeof selectedObj === 'object' && selectedObj.levelName) ||
-      level.label ||
-      `${customField.name || customField.label || 'Hierarchy'} - Level ${idx + 1}`;
-    const levelLabel = escapeHtml(levelLabelText);
-
-    const levelOptions = getOptionsForLevel(level, idx, selectedPath, treeRoot);
-    const currentVal = selectedPath[idx] ?? '';
-    const hasMatch =
-      currentVal !== '' && levelOptions.some(opt => getOptionValue(opt) === currentVal);
-    const hasInvalid = currentVal !== '' && !hasMatch;
-    const placeholderSelected = !hasMatch && !hasInvalid ? ' selected' : '';
-
-    const invalidLabel =
-      selectedObj && typeof selectedObj === 'object' && selectedObj.name
-        ? selectedObj.name
-        : currentVal;
-
-    levelsHtml += `<div class="hierarchy-level" data-level-index="${idx}">`;
-    levelsHtml += `<label for="${levelId}">${levelLabel}</label>`;
-    levelsHtml += `<select id="${levelId}" data-hierarchy-key="${safeKey}" data-level-index="${idx}" data-level-name="${escapeHtml(levelLabelText)}" class="dynamic-dropdown dynamic-hierarchy-select hierarchy-select"${requiredAttr}>`;
-    levelsHtml += `<option value="" disabled${placeholderSelected}>Select ${levelLabel}</option>`;
-
-    for (const opt of levelOptions) {
-      const optVal = getOptionValue(opt);
-      const optText = getOptionLabel(opt);
-      const selected = optVal === currentVal ? ' selected' : '';
-      levelsHtml += `<option value="${escapeHtml(optVal)}"${selected}>${escapeHtml(optText)}</option>`;
-    }
-
-    if (hasInvalid) {
-      levelsHtml += `<option value="${escapeHtml(currentVal)}" selected disabled>${escapeHtml(invalidLabel)}</option>`;
-    }
-
-    levelsHtml += `</select>`;
-    levelsHtml += `</div>`;
-  });
+  const levelsHtml = buildHierarchyLevelsHtml(
+    customField,
+    rawValue,
+    treeRoot,
+    levels,
+    selectedPath,
+    requiredAttr
+  );
 
   const serializedValue =
     rawValue !== undefined && rawValue !== null
@@ -580,7 +614,11 @@ export function collectUpdatedCustomFields(rootElement = document) {
         const selectedOption = sel.options[sel.selectedIndex];
         pathValue.push({
           id: sel.value,
-          levelName: sel.dataset.levelName || customField?.levels?.[idx]?.label || customField?.levels?.[idx] || `Level ${idx + 1}`,
+          levelName:
+            sel.dataset.levelName ||
+            customField?.levels?.[idx]?.label ||
+            customField?.levels?.[idx] ||
+            `Level ${idx + 1}`,
           name: selectedOption ? selectedOption.textContent : sel.value
         });
       }
@@ -645,7 +683,11 @@ export function bindProductHierarchyEvents(rootElement = document) {
         const selectedOption = sel.options[sel.selectedIndex];
         updatedPathValue.push({
           id: sel.value,
-          levelName: sel.dataset.levelName || customField?.levels?.[idx]?.label || customField?.levels?.[idx] || `Level ${idx + 1}`,
+          levelName:
+            sel.dataset.levelName ||
+            customField?.levels?.[idx]?.label ||
+            customField?.levels?.[idx] ||
+            `Level ${idx + 1}`,
           name: selectedOption ? selectedOption.textContent : sel.value
         });
       }
@@ -666,7 +708,7 @@ export function bindProductHierarchyEvents(rootElement = document) {
       window.PayloadData.customFields[cfKey] = updatedPathValue;
     }
 
-    hydratePrefilledHierarchies(container.parentElement || document);
+    hydratePrefilledHierarchies(container);
   });
 }
 
