@@ -2,9 +2,9 @@ const choicesInstances = new WeakMap();
 
 export function generateCustomField(cfKey, containerClassName, isRequired = false) {
   let fieldHtml = '';
-      
+
   const customField = window?.PayloadCustomFields?.find(cf => cf.key === cfKey);
- 
+
   if (customField) {
     if (customField.element === 'radiobuttons') {
       fieldHtml += generateDropdownCustomField(customField, containerClassName, isRequired);
@@ -25,7 +25,6 @@ export function generateCustomField(cfKey, containerClassName, isRequired = fals
 export function initChoicesOnSelect(selectElement) {
   if (!selectElement || selectElement.tagName !== 'SELECT') return null;
 
-  // Avoid double-initializing
   if (choicesInstances.has(selectElement)) {
     return choicesInstances.get(selectElement);
   }
@@ -55,54 +54,6 @@ export function destroyChoicesOnSelect(selectElement) {
   if (selectElement._choicesInstance) {
     delete selectElement._choicesInstance;
   }
-}
-export function bindProductHierarchyEvents(rootElement = document) {
-  const target = rootElement || document;
-  if (target._productHierarchyBound) return;
-  target._productHierarchyBound = true;
-
-  target.addEventListener('change', (event) => {
-    const select = event.target.closest('.dynamic-hierarchy-select');
-    if (!select) return;
-
-    const cfKey = select.dataset.hierarchyKey;
-    const levelIndex = Number(select.dataset.levelIndex);
-    const container = document.getElementById(`${cfKey}-container`);
-    const hiddenInput = document.getElementById(cfKey);
-    if (!container || !hiddenInput) return;
-
-    const customField = window?.PayloadCustomFields?.find(cf => cf.key === cfKey);
-    const allSelects = Array.from(container.querySelectorAll('.dynamic-hierarchy-select'));
-
-    const updatedPathValue = [];
-    allSelects.forEach((sel, idx) => {
-      if (idx <= levelIndex && sel.value) {
-        const selectedOption = sel.options[sel.selectedIndex];
-        updatedPathValue.push({
-          id: sel.value,
-          levelName: sel.dataset.levelName || customField?.levels?.[idx]?.label || `Level ${idx + 1}`,
-          name: selectedOption ? selectedOption.textContent : sel.value
-        });
-      }
-    });
-
-    window.PayloadData = window.PayloadData || {};
-    window.PayloadData.customFields = window.PayloadData.customFields || {};
-
-    const existingFieldData = window.PayloadData.customFields[cfKey];
-    if (
-      existingFieldData &&
-      typeof existingFieldData === 'object' &&
-      !Array.isArray(existingFieldData) &&
-      'value' in existingFieldData
-    ) {
-      existingFieldData.value = updatedPathValue;
-    } else {
-      window.PayloadData.customFields[cfKey] = updatedPathValue;
-    }
-
-    hydratePrefilledHierarchies(container.parentElement || document);
-  });
 }
 
 export function hydratePrefilledHierarchies(rootElement = document) {
@@ -175,10 +126,13 @@ function getCustomFieldValue(cfKey) {
 }
 
 function getTreeRoot(customField) {
+  if (!customField) return [];
   return (
     customField.options ||
     customField.children ||
     customField.hierarchy ||
+    customField.values ||
+    customField.items ||
     customField.radiobuttons ||
     []
   );
@@ -264,7 +218,6 @@ function generateDropdownCustomField(customField, containerClassName, isRequired
     fieldHtml += `<option value="${escapeHtml(option)}"${isSelected}>${escapeHtml(option)}</option>`;
   }
 
-  // Keep invalid existing values so saving without changing this field preserves them
   if (hasInvalidValue) {
     fieldHtml += `<option value="${escapeHtml(ticketCustomFieldValue)}" selected disabled>${escapeHtml(ticketCustomFieldValue)}</option>`;
   }
@@ -425,15 +378,25 @@ function generateHierarchicalCustomField(customField, containerClassName, isRequ
 }
 
 function normalizeHierarchyLevels(customField, treeRoot) {
-  if (Array.isArray(customField.levels) && customField.levels.length > 0) {
+  if (Array.isArray(customField?.levels) && customField.levels.length > 0) {
     return customField.levels;
   }
 
-  const depth = Math.max(1, getMaxTreeDepth(treeRoot));
-  return Array.from({ length: depth }, (_, idx) => ({
-    label: `${customField.name} - Level ${idx + 1}`,
-    options: idx === 0 ? treeRoot : []
-  }));
+  const rawValue = getCustomFieldValue(customField?.key);
+  const savedCount = Array.isArray(rawValue) ? rawValue.length : 0;
+  const depth = Math.max(1, getMaxTreeDepth(treeRoot), savedCount);
+
+  return Array.from({ length: depth }, (_, idx) => {
+    const savedItem = Array.isArray(rawValue) ? rawValue[idx] : null;
+    const label =
+      savedItem?.levelName ||
+      customField?.levelNames?.[idx] ||
+      `${customField?.name || 'Hierarchy'} - Level ${idx + 1}`;
+    return {
+      label,
+      options: idx === 0 ? treeRoot : []
+    };
+  });
 }
 
 function getMaxTreeDepth(nodes) {
@@ -450,12 +413,14 @@ function getMaxTreeDepth(nodes) {
 
 function getOptionsForLevel(level, levelIndex, selectedPath, treeRoot) {
   if (levelIndex === 0) {
-    return Array.isArray(level.options) && level.options.length > 0 ? level.options : treeRoot;
+    if (Array.isArray(treeRoot) && treeRoot.length > 0) return treeRoot;
+    if (Array.isArray(level?.options) && level.options.length > 0) return level.options;
+    return [];
   }
 
   const parentValue = selectedPath[levelIndex - 1];
   if (!parentValue) {
-    return Array.isArray(level.options) ? level.options : [];
+    return Array.isArray(level?.options) ? level.options : [];
   }
 
   const parentNode = findNodeByValue(treeRoot, parentValue);
@@ -465,7 +430,7 @@ function getOptionsForLevel(level, levelIndex, selectedPath, treeRoot) {
     return childNodes;
   }
 
-  if (Array.isArray(level.options) && level.options.length > 0) {
+  if (Array.isArray(level?.options) && level.options.length > 0) {
     return level.options.filter(opt => !opt.parentValue || opt.parentValue === parentValue);
   }
 
@@ -539,7 +504,6 @@ export function collectUpdatedCustomFields(rootElement = document) {
   const updated = {};
   const existingCustomFields = window?.PayloadData?.customFields || {};
 
-  // 1. Collect hierarchical custom fields
   const hierarchyContainers = rootElement.querySelectorAll('.hierarchy-field-container');
   hierarchyContainers.forEach((container) => {
     const cfKey = container.dataset.fieldKey;
@@ -576,7 +540,6 @@ export function collectUpdatedCustomFields(rootElement = document) {
     }
   });
 
-  // 2. Collect standard inputs & dropdowns inside custom field containers
   const fieldContainers = rootElement.querySelectorAll('[id$="-container"]:not(.hierarchy-field-container)');
   fieldContainers.forEach((container) => {
     const containerId = container.id;
@@ -596,45 +559,53 @@ export function collectUpdatedCustomFields(rootElement = document) {
   return updated;
 }
 
-document.addEventListener('change', (event) => {
-  const select = event.target.closest('.dynamic-hierarchy-select');
-  if (!select) return;
+export function bindProductHierarchyEvents(rootElement = document) {
+  const target = rootElement || document;
+  if (target._productHierarchyBound) return;
+  target._productHierarchyBound = true;
 
-  const cfKey = select.dataset.hierarchyKey;
-  const levelIndex = Number(select.dataset.levelIndex);
-  const container = document.getElementById(`${cfKey}-container`);
-  const hiddenInput = document.getElementById(cfKey);
-  if (!container || !hiddenInput) return;
+  target.addEventListener('change', (event) => {
+    const select = event.target.closest('.dynamic-hierarchy-select');
+    if (!select) return;
 
-  const customField = window?.PayloadCustomFields?.find(cf => cf.key === cfKey);
-  const allSelects = Array.from(container.querySelectorAll('.dynamic-hierarchy-select'));
+    const cfKey = select.dataset.hierarchyKey;
+    const levelIndex = Number(select.dataset.levelIndex);
+    const container = document.getElementById(`${cfKey}-container`);
+    const hiddenInput = document.getElementById(cfKey);
+    if (!container || !hiddenInput) return;
 
-  const updatedPathValue = [];
-  allSelects.forEach((sel, idx) => {
-    if (idx <= levelIndex && sel.value) {
-      const selectedOption = sel.options[sel.selectedIndex];
-      updatedPathValue.push({
-        id: sel.value,
-        levelName: sel.dataset.levelName || customField?.levels?.[idx]?.label || `Level ${idx + 1}`,
-        name: selectedOption ? selectedOption.textContent : sel.value
-      });
+    const customField = window?.PayloadCustomFields?.find(cf => cf.key === cfKey);
+    const allSelects = Array.from(container.querySelectorAll('.dynamic-hierarchy-select'));
+
+    const updatedPathValue = [];
+    allSelects.forEach((sel, idx) => {
+      if (idx <= levelIndex && sel.value) {
+        const selectedOption = sel.options[sel.selectedIndex];
+        updatedPathValue.push({
+          id: sel.value,
+          levelName: sel.dataset.levelName || customField?.levels?.[idx]?.label || `Level ${idx + 1}`,
+          name: selectedOption ? selectedOption.textContent : sel.value
+        });
+      }
+    });
+
+    window.PayloadData = window.PayloadData || {};
+    window.PayloadData.customFields = window.PayloadData.customFields || {};
+
+    const existingFieldData = window.PayloadData.customFields[cfKey];
+    if (
+      existingFieldData &&
+      typeof existingFieldData === 'object' &&
+      !Array.isArray(existingFieldData) &&
+      'value' in existingFieldData
+    ) {
+      existingFieldData.value = updatedPathValue;
+    } else {
+      window.PayloadData.customFields[cfKey] = updatedPathValue;
     }
+
+    hydratePrefilledHierarchies(container.parentElement || document);
   });
+}
 
-  window.PayloadData = window.PayloadData || {};
-  window.PayloadData.customFields = window.PayloadData.customFields || {};
-
-  const existingFieldData = window.PayloadData.customFields[cfKey];
-  if (
-    existingFieldData &&
-    typeof existingFieldData === 'object' &&
-    !Array.isArray(existingFieldData) &&
-    'value' in existingFieldData
-  ) {
-    existingFieldData.value = updatedPathValue;
-  } else {
-    window.PayloadData.customFields[cfKey] = updatedPathValue;
-  }
-
-  hydratePrefilledHierarchies(container.parentElement || document);
-});
+bindProductHierarchyEvents(document);
