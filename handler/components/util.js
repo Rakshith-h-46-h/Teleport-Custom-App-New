@@ -56,6 +56,54 @@ export function destroyChoicesOnSelect(selectElement) {
     delete selectElement._choicesInstance;
   }
 }
+export function bindProductHierarchyEvents(rootElement = document) {
+  const target = rootElement || document;
+  if (target._productHierarchyBound) return;
+  target._productHierarchyBound = true;
+
+  target.addEventListener('change', (event) => {
+    const select = event.target.closest('.dynamic-hierarchy-select');
+    if (!select) return;
+
+    const cfKey = select.dataset.hierarchyKey;
+    const levelIndex = Number(select.dataset.levelIndex);
+    const container = document.getElementById(`${cfKey}-container`);
+    const hiddenInput = document.getElementById(cfKey);
+    if (!container || !hiddenInput) return;
+
+    const customField = window?.PayloadCustomFields?.find(cf => cf.key === cfKey);
+    const allSelects = Array.from(container.querySelectorAll('.dynamic-hierarchy-select'));
+
+    const updatedPathValue = [];
+    allSelects.forEach((sel, idx) => {
+      if (idx <= levelIndex && sel.value) {
+        const selectedOption = sel.options[sel.selectedIndex];
+        updatedPathValue.push({
+          id: sel.value,
+          levelName: sel.dataset.levelName || customField?.levels?.[idx]?.label || `Level ${idx + 1}`,
+          name: selectedOption ? selectedOption.textContent : sel.value
+        });
+      }
+    });
+
+    window.PayloadData = window.PayloadData || {};
+    window.PayloadData.customFields = window.PayloadData.customFields || {};
+
+    const existingFieldData = window.PayloadData.customFields[cfKey];
+    if (
+      existingFieldData &&
+      typeof existingFieldData === 'object' &&
+      !Array.isArray(existingFieldData) &&
+      'value' in existingFieldData
+    ) {
+      existingFieldData.value = updatedPathValue;
+    } else {
+      window.PayloadData.customFields[cfKey] = updatedPathValue;
+    }
+
+    hydratePrefilledHierarchies(container.parentElement || document);
+  });
+}
 
 export function hydratePrefilledHierarchies(rootElement = document) {
   if (!rootElement) return;
