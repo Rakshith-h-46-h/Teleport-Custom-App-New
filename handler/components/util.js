@@ -216,6 +216,7 @@ function generateDropdownCustomField(customField, containerClassName, isRequired
     fieldHtml += `<option value="${escapeHtml(option)}"${isSelected}>${escapeHtml(option)}</option>`;
   }
 
+  // Keep invalid existing values so saving without changing this field preserves them
   if (hasInvalidValue) {
     fieldHtml += `<option value="${escapeHtml(ticketCustomFieldValue)}" selected disabled>${escapeHtml(ticketCustomFieldValue)}</option>`;
   }
@@ -482,50 +483,11 @@ export function escapeHtml(str) {
     .replaceAll("&", "&")
     .replaceAll("<", "<")
     .replaceAll(">", ">")
-    .replaceAll('"', '"')
+    .replaceAll('"', """)
     .replaceAll("'", "'");
 }
 
-document.addEventListener('change', (event) => {
-  const select = event.target.closest('.dynamic-hierarchy-select');
-  if (!select) return;
-
-  const cfKey = select.dataset.hierarchyKey;
-  const levelIndex = Number(select.dataset.levelIndex);
-  const container = document.getElementById(`${cfKey}-container`);
-  const hiddenInput = document.getElementById(cfKey);
-  if (!container || !hiddenInput) return;
-
-  const customField = window?.PayloadCustomFields?.find(cf => cf.key === cfKey);
-  const allSelects = Array.from(container.querySelectorAll('.dynamic-hierarchy-select'));
-
-  const updatedPathValue = [];
-  allSelects.forEach((sel, idx) => {
-    if (idx <= levelIndex && sel.value) {
-      const selectedOption = sel.options[sel.selectedIndex];
-      updatedPathValue.push({
-        id: sel.value,
-        levelName: sel.dataset.levelName || customField?.levels?.[idx]?.label || `Level ${idx + 1}`,
-        name: selectedOption ? selectedOption.textContent : sel.value
-      });
-    }
-  });
-
-  window.PayloadData = window.PayloadData || {};
-  window.PayloadData.customFields = window.PayloadData.customFields || {};
-
-  const existingFieldData = window.PayloadData.customFields[cfKey];
-  if (
-    existingFieldData &&
-    typeof existingFieldData === 'object' &&
-    !Array.isArray(existingFieldData) &&
-    'value' in existingFieldData
-  ) {
-    existingFieldData.value = updatedPathValue;
-  } else {
-    window.PayloadData.customFields[cfKey] = updatedPathValue;
-  }
-  export function collectUpdatedCustomFields(rootElement = document) {
+export function collectUpdatedCustomFields(rootElement = document) {
   const updated = {};
   const existingCustomFields = window?.PayloadData?.customFields || {};
 
@@ -585,6 +547,46 @@ document.addEventListener('change', (event) => {
 
   return updated;
 }
+
+document.addEventListener('change', (event) => {
+  const select = event.target.closest('.dynamic-hierarchy-select');
+  if (!select) return;
+
+  const cfKey = select.dataset.hierarchyKey;
+  const levelIndex = Number(select.dataset.levelIndex);
+  const container = document.getElementById(`${cfKey}-container`);
+  const hiddenInput = document.getElementById(cfKey);
+  if (!container || !hiddenInput) return;
+
+  const customField = window?.PayloadCustomFields?.find(cf => cf.key === cfKey);
+  const allSelects = Array.from(container.querySelectorAll('.dynamic-hierarchy-select'));
+
+  const updatedPathValue = [];
+  allSelects.forEach((sel, idx) => {
+    if (idx <= levelIndex && sel.value) {
+      const selectedOption = sel.options[sel.selectedIndex];
+      updatedPathValue.push({
+        id: sel.value,
+        levelName: sel.dataset.levelName || customField?.levels?.[idx]?.label || `Level ${idx + 1}`,
+        name: selectedOption ? selectedOption.textContent : sel.value
+      });
+    }
+  });
+
+  window.PayloadData = window.PayloadData || {};
+  window.PayloadData.customFields = window.PayloadData.customFields || {};
+
+  const existingFieldData = window.PayloadData.customFields[cfKey];
+  if (
+    existingFieldData &&
+    typeof existingFieldData === 'object' &&
+    !Array.isArray(existingFieldData) &&
+    'value' in existingFieldData
+  ) {
+    existingFieldData.value = updatedPathValue;
+  } else {
+    window.PayloadData.customFields[cfKey] = updatedPathValue;
+  }
 
   hydratePrefilledHierarchies(container.parentElement || document);
 });
