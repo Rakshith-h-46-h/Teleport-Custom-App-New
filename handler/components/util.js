@@ -318,16 +318,44 @@ export function generateCustomField(cfKey, containerClass = "custom-field-contai
   return html;
 }
 
+function getSelectCurrentValue(selectEl) {
+  if (!selectEl) return "";
+  if (selectEl.value !== undefined && selectEl.value !== null && String(selectEl.value) !== "") {
+    return String(selectEl.value);
+  }
+  const choicesInstance = choicesInstances.get(selectEl);
+  if (choicesInstance && typeof choicesInstance.getValue === "function") {
+    const picked = choicesInstance.getValue(true);
+    const val = Array.isArray(picked) ? picked[0] : picked;
+    if (val !== undefined && val !== null && String(val) !== "") {
+      return String(val);
+    }
+  }
+  return "";
+}
+
+function isLevelHidden(selectEl) {
+  if (!selectEl) return true;
+  if (selectEl.hasAttribute("hidden")) return true;
+  const wrapper = selectEl.closest(".hierarchy-level-item, .field-item");
+  if (!wrapper) return false;
+  if (wrapper.classList.contains("hidden")) return true;
+  const style = window.getComputedStyle ? window.getComputedStyle(wrapper) : null;
+  return Boolean(style && (style.display === "none" || style.visibility === "hidden"));
+}
+
 export function collectUpdatedCustomFields(formElement = document.getElementById("customForm")) {
   const existing = { ...(window?.PayloadData?.customFields || {}) };
   if (!formElement) return existing;
 
+  // Remove stale *_level_* keys from existing state
   Object.keys(existing).forEach((key) => {
-    if (/^h\d+_level_\d+$/.test(key)) {
+    if (/^.+_level_\d+$/.test(key)) {
       delete existing[key];
     }
   });
 
+  // 1. Collect all standard inputs, selects, and textareas (excluding hierarchy level selects)
   const controls = formElement.querySelectorAll("input, select, textarea");
   controls.forEach((el) => {
     if (el.classList?.contains("hierarchy-select")) return;
@@ -338,7 +366,7 @@ export function collectUpdatedCustomFields(formElement = document.getElementById
     if (!rawKey) return;
 
     const cleanKey = rawKey.startsWith("cf_") ? rawKey.slice(3) : rawKey;
-    if (/^h\d+_level_\d+$/.test(cleanKey) || cleanKey === "ticket_type") {
+    if (/^.+_level_\d+$/.test(cleanKey) || cleanKey === "ticket_type") {
       return;
     }
 
@@ -349,15 +377,7 @@ export function collectUpdatedCustomFields(formElement = document.getElementById
         existing[cleanKey] = String(el.value ?? "").trim();
       }
     } else if (el.tagName === "SELECT") {
-      const choicesInstance = choicesInstances.get(el);
-      let val = el.value ?? "";
-
-      if (choicesInstance && typeof choicesInstance.getValue === "function") {
-        const picked = choicesInstance.getValue(true);
-        val = Array.isArray(picked) ? (picked[0] ?? val) : (picked ?? val);
-      }
-
-      const trimmed = String(val ?? "").trim();
+      const trimmed = getSelectCurrentValue(el).trim();
       if (trimmed !== "") {
         existing[cleanKey] = trimmed;
       } else {
@@ -373,11 +393,34 @@ export function collectUpdatedCustomFields(formElement = document.getElementById
     }
   });
 
-  const hierarchyGroups = formElement.querySelectorAll("[data-hierarchy-key]");
-  hierarchyGroups.forEach((group) => {
-    const cfKey = group.getAttribute("data-hierarchy-key");
+  // 2. Group ALL hierarchy selects across the entire form (h1, h2, h3, etc.)
+  const hierarchySelects = Array.from(formElement.querySelectorAll("select.hierarchy-select"));
+  const groupedSelects = new Map();
+
+  hierarchySelects.forEach((sel) => {
+    let cfKey = sel.getAttribute("data-hierarchy-key") || "";
+    let levelIdx = Number(sel.getAttribute("data-level-index"));
+
+    // Fallback: parse `<key>_level_<index>` from id/name if data attributes are missing
+    const idMatch = (sel.id || sel.name || "").match(/^(?:cf_)?(.+)_level_(\d+)$/);
+    if (!cfKey && idMatch) {
+      cfKey = idMatch[1];
+    }
+    if (Number.isNaN(levelIdx) && idMatch) {
+      levelIdx = Number(idMatch[2]);
+    }
     if (!cfKey) return;
 
+    if (!groupedSelects.has(cfKey)) {
+      groupedSelects.set(cfKey, []);
+    }
+    groupedSelects.get(cfKey).push({
+      sel,
+      levelIdx: Number.isNaN(levelIdx) ? 0 : levelIdx
+    });
+  });
+
+  groupedSelects.forEach((entries, cfKey) => {
     const fieldConfig = getCustomFieldConfig(cfKey);
     const levels = Array.isArray(fieldConfig?.levels) ? fieldConfig.levels : [];
     const fieldDisplayName =
@@ -386,29 +429,15 @@ export function collectUpdatedCustomFields(formElement = document.getElementById
       (typeof existing[cfKey] === "object" && existing[cfKey]?.name) ||
       cfKey;
 
-    const levelSelects = Array.from(group.querySelectorAll("select.hierarchy-select")).sort(
-      (a, b) => Number(a.dataset.levelIndex || 0) - Number(b.dataset.levelIndex || 0)
-    );
+    const sorted = entries.sort((a, b) => a.levelIdx - b.levelIdx);
 
-    const selectedEntries = levelSelects
-      .map((sel) => {
-        const wrapper = sel.closest(".hierarchy-level-item");
-        const isHidden =
-          Boolean(wrapper?.classList?.contains("hidden")) ||
-          wrapper?.style?.display === "none";
-        if (isHidden) return null;
+    const selectedEntries = sorted
+      .map(({ sel, levelIdx }) => {
+        if (isLevelHidden(sel)) return null;
 
-        const choicesInstance = choicesInstances.get(sel);
-        let selectedId = sel.value ?? "";
-        if (choicesInstance && typeof choicesInstance.getValue === "function") {
-          const picked = choicesInstance.getValue(true);
-          selectedId = Array.isArray(picked) ? (picked[0] ?? selectedId) : (picked ?? selectedId);
-        }
-
-        selectedId = String(selectedId ?? "").trim();
+        const selectedId = getSelectCurrentValue(sel).trim();
         if (!selectedId) return null;
 
-        const levelIdx = Number(sel.dataset.levelIndex || 0);
         const levelName = levels[levelIdx] || `Level ${levelIdx + 1}`;
         const levelOptions = Array.isArray(fieldConfig?.options?.[levelIdx])
           ? fieldConfig.options[levelIdx]
@@ -436,6 +465,7 @@ export function collectUpdatedCustomFields(formElement = document.getElementById
       delete existing[cfKey];
     }
 
+    // Ensure no raw `<key>_level_<n>` keys linger
     Object.keys(existing).forEach((k) => {
       if (new RegExp(`^${cfKey}_level_\\d+$`).test(k)) {
         delete existing[k];
