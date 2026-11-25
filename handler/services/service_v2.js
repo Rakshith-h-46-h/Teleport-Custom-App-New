@@ -1,71 +1,111 @@
-import { yAppWidget } from "../app.js";
+import { collectUpdatedCustomFields } from "../components/util.js";
+
+const API_CONFIG = {
+  endpoint: "/api/tickets/custom-fields", // Update to match your backend endpoint URL
+  method: "POST", // Update to "PUT" or "PATCH" if required by your API
+  sendWrappedCustomFields: false // Set to true if backend expects { customFields: {...} }
+};
+
+function getAuthHeaders() {
+  const headers = {
+    "Content-Type": "application/json"
+  };
+
+  const token =
+    window?.PayloadData?.authToken ||
+    window?.PayloadData?.token ||
+    window?.sessionStorage?.getItem("authToken") ||
+    window?.localStorage?.getItem("authToken");
+
+  if (token) {
+    headers.Authorization = token.startsWith("Bearer ") ? token : `Bearer ${token}`;
+  }
+
+  return headers;
+}
+
+function buildRequestBody(updatedCustomFields) {
+  const ticketId =
+    window?.PayloadData?.ticketId ||
+    window?.PayloadData?.ticket_id ||
+    window?.PayloadData?.id ||
+    null;
+
+  if (API_CONFIG.sendWrappedCustomFields) {
+    return {
+      ...(ticketId ? { ticketId } : {}),
+      customFields: updatedCustomFields
+    };
+  }
+
+  return updatedCustomFields;
+}
+
+export async function submitCustomFields(updatedCustomFields) {
+  const payload = buildRequestBody(updatedCustomFields);
+  console.log("Submitting payload:", payload);
+
+  const response = await fetch(API_CONFIG.endpoint, {
+    method: API_CONFIG.method,
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload)
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const responseData = contentType.includes("application/json")
+    ? await response.json()
+    : await response.text();
+
+  if (!response.ok) {
+    const errorMessage =
+      typeof responseData === "object" && responseData?.message
+        ? responseData.message
+        : `Request failed with status ${response.status}`;
+    throw new Error(errorMessage);
+  }
+
+  // Keep in-memory customFields synced with the latest saved state
+  window.PayloadData = window.PayloadData || {};
+  window.PayloadData.customFields = {
+    ...(window.PayloadData.customFields || {}),
+    ...updatedCustomFields
+  };
+
+  return responseData;
+}
 
 export function addSubmitFormEventListener() {
-  let button = document.getElementById("btn_store");
+  const form = document.getElementById("customForm");
+  if (!form) return;
 
-  button.addEventListener("click", async event => {
+  if (form.dataset.submitListenerAttached === "true") return;
+  form.dataset.submitListenerAttached = "true";
+
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
 
-    const updatedCustomFields = {};
-    const updatedTaxonomyV2 = [];
-    let requiredButEmptyCheck = false;
+    const submitBtn =
+      form.querySelector("#btn_store") || form.querySelector('button[type="submit"]');
+    const originalBtnText = submitBtn ? submitBtn.textContent : "";
 
-    const inputs = document.querySelectorAll("#customForm select, #customForm input");
-    inputs.forEach(input => {
-       if (!input.id || input.id.trim() === "") {
-    return;
-  }
-      if (input.required) {
-        const errorMessageSpan = document.getElementById(input.id + '-error-message');
+    const updatedCustomFields = collectUpdatedCustomFields(form);
 
-        if (!input.value) {
-          requiredButEmptyCheck = true;
-          errorMessageSpan.classList.remove('hidden');
-        }
-        else {
-          errorMessageSpan.classList.add('hidden');
-        }
+    try {
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Saving...";
       }
 
-      if (input.id.startsWith('h2')) {
-        const level = parseInt(input.id[input.id.length - 1]);
-        const chosenOption = input.options[input.selectedIndex];
-      } else if (input.type === 'date') {
-        // handle date custom field -> add time
-        if (input.value) {
-          const time = new Date().toISOString().split('T')[1];
-          updatedCustomFields[input.id] = input.value + 'T' + time;
-        }
-   } else {
-    const value = input.value.trim();
-
-    if (value === "") {
-        if (input.required) {
-            requiredButEmptyCheck = true;
-            document
-                .getElementById(input.id + "-error-message")
-                ?.classList.remove("hidden");
-        }
-        return;
-    }
-
-    updatedCustomFields[input.id] = value;
-}
-})
-    
-    if (!requiredButEmptyCheck) {
-      // Add Team field manually
-updatedCustomFields["k19"] = window.PayloadData.customFields.k19;
-      console.log(updatedCustomFields);
-console.log("Submitting payload:");
-console.log(JSON.stringify(updatedCustomFields, null, 2));
-      const submittedData = await yAppWidget.update(
-        "update_custom_fields",
-        updatedCustomFields,
-      );
-
-      console.log("custom fields updated", submittedData);
+      const result = await submitCustomFields(updatedCustomFields);
+      console.log("Custom fields updated successfully:", result);
       alert("Data successfully updated.");
+    } catch (error) {
+      console.error("Failed to submit custom fields:", error);
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalBtnText || "Submit";
+      }
     }
   });
 }
