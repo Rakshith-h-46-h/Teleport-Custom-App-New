@@ -157,6 +157,11 @@ function populateAndToggleHierarchyLevel(field, levelIndex, parentId, rawPrefill
 
   wrapper.classList.toggle("hidden", !shouldShow);
 
+  if (select.hasAttribute("required") || select.dataset.wasRequired === "true") {
+    select.dataset.wasRequired = "true";
+    select.required = shouldShow;
+  }
+
   if (initChoices) {
     initChoicesOnSelect(select);
   }
@@ -188,7 +193,6 @@ export function hydratePrefilledHierarchies(rootElement = document) {
         false
       );
 
-      // Move down the chain whenever a value is prefilled (or if level 0 has a prefilled value)
       if (selectedId) {
         currentParentId = selectedId;
       } else if (prefillForLevel) {
@@ -197,18 +201,22 @@ export function hydratePrefilledHierarchies(rootElement = document) {
         currentParentId = "";
       }
 
-      // If no value is prefilled at this level, hide any levels deeper than this one
       if (!currentParentId && !hasOptions) {
         for (let deeper = idx + 1; deeper < field.levels.length; deeper++) {
           const deeperWrapper = document.getElementById(`${field.key}_level_${deeper}-wrapper`);
           const deeperSelect = document.getElementById(`${field.key}_level_${deeper}`);
-          if (deeperSelect) destroyChoicesOnSelect(deeperSelect);
+          if (deeperSelect) {
+            destroyChoicesOnSelect(deeperSelect);
+            if (deeperSelect.hasAttribute("required") || deeperSelect.dataset.wasRequired === "true") {
+              deeperSelect.dataset.wasRequired = "true";
+              deeperSelect.required = false;
+            }
+          }
           if (deeperWrapper) deeperWrapper.classList.add("hidden");
         }
       }
     });
 
-    // Initialize Choices.js on all level selects after all values & visibility are set
     field.levels.forEach((_, idx) => {
       const select = document.getElementById(`${field.key}_level_${idx}`);
       if (select) initChoicesOnSelect(select);
@@ -244,6 +252,10 @@ export function bindProductHierarchyEvents(formContainer) {
           destroyChoicesOnSelect(nextSelect);
           const nextLabel = field.levels[nextIdx] || `Level ${nextIdx + 1}`;
           nextSelect.innerHTML = `<option value="" selected>Select ${escapeHtml(nextLabel)}</option>`;
+          if (nextSelect.hasAttribute("required") || nextSelect.dataset.wasRequired === "true") {
+            nextSelect.dataset.wasRequired = "true";
+            nextSelect.required = false;
+          }
           initChoicesOnSelect(nextSelect);
         }
         if (nextWrapper) {
@@ -294,19 +306,17 @@ export function generateCustomField(cfKey, containerClass = "custom-field-contai
 
   return html;
 }
-	
+
 export function collectUpdatedCustomFields(formElement = document.getElementById("customForm")) {
   const existing = { ...(window?.PayloadData?.customFields || {}) };
   if (!formElement) return existing;
 
-  // Track which radio groups had a checked option in the current form
   const checkedRadios = new Set();
 
-  // 1. Collect all standard inputs, selects, and textareas (excluding hierarchy level selects)
   const controls = formElement.querySelectorAll("input, select, textarea");
   controls.forEach((el) => {
     if (el.classList?.contains("hierarchy-select")) return;
-    if (el.classList?.contains("choices__input")) return; // Ignore Choices.js internal search box
+    if (el.classList?.contains("choices__input")) return;
 
     const rawKey = el.name || el.id;
     if (!rawKey) return;
@@ -323,7 +333,6 @@ export function collectUpdatedCustomFields(formElement = document.getElementById
         existing[cleanKey] = "";
       }
     } else if (el.tagName === "SELECT") {
-      // If Choices.js instance exists, read its current value as well
       const choicesInstance = choicesInstances.get(el);
       const val =
         choicesInstance && typeof choicesInstance.getValue === "function"
@@ -335,12 +344,10 @@ export function collectUpdatedCustomFields(formElement = document.getElementById
 
       existing[cleanKey] = String(val);
     } else {
-      // Short text, long text (textarea), number, date, etc. (including cleared values)
       existing[cleanKey] = el.value ?? "";
     }
   });
 
-  // 2. Collect multi-level hierarchy fields (e.g., h1_level_0..3 -> existing.h1)
   const hierarchyGroups = formElement.querySelectorAll("[data-hierarchy-key]");
   hierarchyGroups.forEach((group) => {
     const cfKey = group.getAttribute("data-hierarchy-key");
@@ -353,23 +360,18 @@ export function collectUpdatedCustomFields(formElement = document.getElementById
     const selectedValues = levelSelects
       .map((sel) => {
         const wrapper = sel.closest(".hierarchy-level-item");
-        const isHidden = wrapper?.classList?.contains("hidden");
+        const isHidden =
+          Boolean(wrapper?.classList?.contains("hidden")) ||
+          wrapper?.style?.display === "none";
         if (isHidden) return null;
 
-        const choicesInstance = choicesInstances.get(sel);
-        const val =
-          choicesInstance && typeof choicesInstance.getValue === "function"
-            ? (() => {
-                const v = choicesInstance.getValue(true);
-                return Array.isArray(v) ? v[0] ?? "" : v ?? sel.value ?? "";
-              })()
-            : sel.value ?? "";
-
-        return val !== "" ? String(val) : null;
+        return sel.value ? String(sel.value) : null;
       })
       .filter((val) => val !== null);
 
-    existing[cfKey] = selectedValues;
+    if (selectedValues.length > 0) {
+      existing[cfKey] = selectedValues;
+    }
   });
 
   return existing;
