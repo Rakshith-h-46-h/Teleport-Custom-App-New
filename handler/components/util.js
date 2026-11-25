@@ -294,3 +294,41 @@ export function generateCustomField(cfKey, containerClass = "custom-field-contai
 
   return html;
 }
+	
+export function collectUpdatedCustomFields(formElement = document.getElementById("customForm")) {
+  const existing = { ...(window?.PayloadData?.customFields || {}) };
+  if (!formElement) return existing;
+  const controls = formElement.querySelectorAll("input, select, textarea");
+  controls.forEach((el) => {
+    if (el.classList?.contains("hierarchy-select")) return;
+    if (!el.name && !el.id) return;
+    const rawKey = el.name || el.id;
+    const cleanKey = rawKey.startsWith("cf_") ? rawKey.slice(3) : rawKey;
+    if (el.type === "checkbox") {
+      existing[cleanKey] = Boolean(el.checked);
+    } else if (el.type === "radio") {
+      if (el.checked) existing[cleanKey] = el.value;
+    } else if (el.value !== undefined && el.value !== "") {
+      existing[cleanKey] = el.value;
+    }
+  });
+  const hierarchyGroups = formElement.querySelectorAll("[data-hierarchy-key]");
+  hierarchyGroups.forEach((group) => {
+    const cfKey = group.getAttribute("data-hierarchy-key");
+    if (!cfKey) return;
+    const levelSelects = Array.from(group.querySelectorAll("select.hierarchy-select")).sort(
+      (a, b) => Number(a.dataset.levelIndex || 0) - Number(b.dataset.levelIndex || 0)
+    );
+    const selectedValues = levelSelects
+      .map((sel) => {
+        const wrapper = sel.closest(".hierarchy-level-item");
+        const isHidden = wrapper?.classList?.contains("hidden");
+        return !isHidden && sel.value ? sel.value : null;
+      })
+      .filter((val) => val !== null && val !== "");
+    if (selectedValues.length > 0) {
+      existing[cfKey] = selectedValues;
+    }
+  });
+  return existing;
+}
