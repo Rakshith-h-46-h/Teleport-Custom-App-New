@@ -525,6 +525,66 @@ document.addEventListener('change', (event) => {
   } else {
     window.PayloadData.customFields[cfKey] = updatedPathValue;
   }
+  export function collectUpdatedCustomFields(rootElement = document) {
+  const updated = {};
+  const existingCustomFields = window?.PayloadData?.customFields || {};
+
+  // 1. Collect hierarchical custom fields
+  const hierarchyContainers = rootElement.querySelectorAll('.hierarchy-field-container');
+  hierarchyContainers.forEach((container) => {
+    const cfKey = container.dataset.fieldKey;
+    if (!cfKey) return;
+
+    const customField = window?.PayloadCustomFields?.find(cf => cf.key === cfKey);
+    const selects = Array.from(container.querySelectorAll('.dynamic-hierarchy-select'));
+
+    const pathValue = [];
+    selects.forEach((sel, idx) => {
+      if (sel.value) {
+        const selectedOption = sel.options[sel.selectedIndex];
+        pathValue.push({
+          id: sel.value,
+          levelName: sel.dataset.levelName || customField?.levels?.[idx]?.label || `Level ${idx + 1}`,
+          name: selectedOption ? selectedOption.textContent : sel.value
+        });
+      }
+    });
+
+    const existingFieldData = existingCustomFields[cfKey];
+    if (
+      existingFieldData &&
+      typeof existingFieldData === 'object' &&
+      !Array.isArray(existingFieldData) &&
+      'value' in existingFieldData
+    ) {
+      updated[cfKey] = {
+        ...existingFieldData,
+        value: pathValue
+      };
+    } else {
+      updated[cfKey] = pathValue;
+    }
+  });
+
+  // 2. Collect standard inputs & dropdowns inside custom field containers
+  const fieldContainers = rootElement.querySelectorAll('[id$="-container"]:not(.hierarchy-field-container)');
+  fieldContainers.forEach((container) => {
+    const containerId = container.id;
+    const cfKey = containerId.replace(/-container$/, '');
+    if (!cfKey || cfKey in updated) return;
+
+    const control = container.querySelector(`#${CSS.escape(cfKey)}, select, input, textarea`);
+    if (!control) return;
+
+    if (control.type === 'checkbox') {
+      updated[cfKey] = control.checked;
+    } else {
+      updated[cfKey] = control.value;
+    }
+  });
+
+  return updated;
+}
 
   hydratePrefilledHierarchies(container.parentElement || document);
 });
