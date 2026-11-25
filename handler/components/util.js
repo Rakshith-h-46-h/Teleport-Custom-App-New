@@ -298,37 +298,79 @@ export function generateCustomField(cfKey, containerClass = "custom-field-contai
 export function collectUpdatedCustomFields(formElement = document.getElementById("customForm")) {
   const existing = { ...(window?.PayloadData?.customFields || {}) };
   if (!formElement) return existing;
+
+  // Track which radio groups had a checked option in the current form
+  const checkedRadios = new Set();
+
+  // 1. Collect all standard inputs, selects, and textareas (excluding hierarchy level selects)
   const controls = formElement.querySelectorAll("input, select, textarea");
   controls.forEach((el) => {
     if (el.classList?.contains("hierarchy-select")) return;
-    if (!el.name && !el.id) return;
+    if (el.classList?.contains("choices__input")) return; // Ignore Choices.js internal search box
+
     const rawKey = el.name || el.id;
+    if (!rawKey) return;
+
     const cleanKey = rawKey.startsWith("cf_") ? rawKey.slice(3) : rawKey;
+
     if (el.type === "checkbox") {
       existing[cleanKey] = Boolean(el.checked);
     } else if (el.type === "radio") {
-      if (el.checked) existing[cleanKey] = el.value;
-    } else if (el.value !== undefined && el.value !== "") {
-      existing[cleanKey] = el.value;
+      if (el.checked) {
+        existing[cleanKey] = el.value;
+        checkedRadios.add(cleanKey);
+      } else if (!checkedRadios.has(cleanKey) && !(cleanKey in existing)) {
+        existing[cleanKey] = "";
+      }
+    } else if (el.tagName === "SELECT") {
+      // If Choices.js instance exists, read its current value as well
+      const choicesInstance = choicesInstances.get(el);
+      const val =
+        choicesInstance && typeof choicesInstance.getValue === "function"
+          ? (() => {
+              const v = choicesInstance.getValue(true);
+              return Array.isArray(v) ? v[0] ?? "" : v ?? el.value ?? "";
+            })()
+          : el.value ?? "";
+
+      existing[cleanKey] = String(val);
+    } else {
+      // Short text, long text (textarea), number, date, etc. (including cleared values)
+      existing[cleanKey] = el.value ?? "";
     }
   });
+
+  // 2. Collect multi-level hierarchy fields (e.g., h1_level_0..3 -> existing.h1)
   const hierarchyGroups = formElement.querySelectorAll("[data-hierarchy-key]");
   hierarchyGroups.forEach((group) => {
     const cfKey = group.getAttribute("data-hierarchy-key");
     if (!cfKey) return;
+
     const levelSelects = Array.from(group.querySelectorAll("select.hierarchy-select")).sort(
       (a, b) => Number(a.dataset.levelIndex || 0) - Number(b.dataset.levelIndex || 0)
     );
+
     const selectedValues = levelSelects
       .map((sel) => {
         const wrapper = sel.closest(".hierarchy-level-item");
         const isHidden = wrapper?.classList?.contains("hidden");
-        return !isHidden && sel.value ? sel.value : null;
+        if (isHidden) return null;
+
+        const choicesInstance = choicesInstances.get(sel);
+        const val =
+          choicesInstance && typeof choicesInstance.getValue === "function"
+            ? (() => {
+                const v = choicesInstance.getValue(true);
+                return Array.isArray(v) ? v[0] ?? "" : v ?? sel.value ?? "";
+              })()
+            : sel.value ?? "";
+
+        return val !== "" ? String(val) : null;
       })
-      .filter((val) => val !== null && val !== "");
-    if (selectedValues.length > 0) {
-      existing[cfKey] = selectedValues;
-    }
+      .filter((val) => val !== null);
+
+    existing[cfKey] = selectedValues;
   });
+
   return existing;
 }
