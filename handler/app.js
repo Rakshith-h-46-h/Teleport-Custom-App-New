@@ -11,9 +11,9 @@ export let yAppWidget = null;
 
     yAppWidget = new YAppWidget();
 
-    const fraudRes = await fetch("./assets/json/fraud.json", { cache: "no-store" });
+    const fraudRes = await fetch("./assets/json/customfields.json", { cache: "no-store" });
     if (!fraudRes.ok) {
-      throw new Error("Cannot load fraud.json");
+      throw new Error("Cannot load customfields.json");
     }
     window.DefaultFieldsData = await fraudRes.json();
     console.log("Loaded: fraud");
