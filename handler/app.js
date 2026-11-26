@@ -18,8 +18,6 @@ export let yAppWidget = null;
     window.DefaultFieldsData = await fraudRes.json();
     console.log("Loaded: fraud");
 
-    await applyDebugState(runRenderForm);
-
     const data = await yAppWidget.ask("ask_ticket_cf_info");
     console.log("Received ticket information:", data);
 
