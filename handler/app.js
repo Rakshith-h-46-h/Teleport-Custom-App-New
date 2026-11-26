@@ -1,4 +1,3 @@
-import { applyDebugState } from "./components/applyDebugState.js";
 import { renderForm } from "./components/main_form.js";
 import { initChoicesOnSelect } from "./components/util.js";
 
