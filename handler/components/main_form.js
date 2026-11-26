@@ -5,7 +5,7 @@ import {
   generateTicketTypeField,
   addTicketTypeEventListener,
   loadTicketTypeFields
-} from "./fraud.template.js";
+} from "./template.js";
 import { bindProductHierarchyEvents } from "./util.js";
 import { addSubmitFormEventListener } from "../services/service_v2.js";
 
